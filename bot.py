@@ -150,8 +150,9 @@ def init_db():
                 is_agent     INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS config_types (
-                id   INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS packages (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -242,6 +243,8 @@ def init_db():
             "free_test_enabled": "1",
             "agent_test_limit": "0",
             "agent_test_period": "day",
+            "purchase_rules_enabled": "0",
+            "purchase_rules_text": "♨️ قوانین استفاده از خدمات ما\n\nلطفاً پیش از استفاده از سرویس‌ها، موارد زیر را با دقت مطالعه فرمایید:\n\n1️⃣ اطلاعیه‌های منتشرشده در کانال را حتماً دنبال کنید. هرگونه تغییر، بروزرسانی یا قطعی احتمالی از طریق کانال اطلاع‌رسانی خواهد شد.\n\n2️⃣ در صورتی که با مشکلی در اتصال یا عملکرد سرویس مواجه شدید و اطلاعیه‌ای در کانال منتشر نشده بود، لطفاً به پشتیبانی پیام دهید تا در سریع‌ترین زمان ممکن بررسی شود.\n\n3️⃣ از ارسال مشخصات سرویس (کانفیگ) از طریق پیامک خودداری کنید، زیرا ممکن است به درستی منتقل نشود. در صورت نیاز، از روش‌های امن‌تر مانند ایمیل استفاده نمایید.\n\n4️⃣ مسئولیت حفظ و نگهداری اطلاعات سرویس بر عهده کاربر می‌باشد. از اشتراک‌گذاری آن با دیگران خودداری کنید.\n\n5️⃣ هرگونه سوءاستفاده از خدمات، ممکن است منجر به مسدود شدن سرویس بدون اطلاع قبلی شود.\n\n🙏 با رعایت این قوانین، به ما در ارائه خدمات پایدار و بهتر کمک کنید.",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -256,6 +259,7 @@ def init_db():
             "ALTER TABLE configs ADD COLUMN is_expired INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE payments ADD COLUMN crypto_coin TEXT",
             "ALTER TABLE packages ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE config_types ADD COLUMN description TEXT NOT NULL DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -410,13 +414,17 @@ def get_type(type_id):
     with get_conn() as conn:
         return conn.execute("SELECT * FROM config_types WHERE id=?", (type_id,)).fetchone()
 
-def add_type(name):
+def add_type(name, description=""):
     with get_conn() as conn:
-        conn.execute("INSERT INTO config_types(name) VALUES(?)", (name.strip(),))
+        conn.execute("INSERT INTO config_types(name, description) VALUES(?, ?)", (name.strip(), description.strip()))
 
 def update_type(type_id, new_name):
     with get_conn() as conn:
         conn.execute("UPDATE config_types SET name=? WHERE id=?", (new_name.strip(), type_id))
+
+def update_type_description(type_id, description):
+    with get_conn() as conn:
+        conn.execute("UPDATE config_types SET description=? WHERE id=?", (description.strip(), type_id))
 
 def delete_type(type_id):
     with get_conn() as conn:
@@ -472,16 +480,30 @@ def update_package_field(package_id, field, value):
         if field == "position":
             pkg = conn.execute("SELECT type_id, position FROM packages WHERE id=?", (package_id,)).fetchone()
             if pkg:
-                old_pos = pkg[1]
+                old_pos = pkg["position"]
                 new_pos = value
-                type_id = pkg[0]
+                type_id = pkg["type_id"]
                 if new_pos != old_pos:
-                    # Shift others down if position is taken
-                    conn.execute(
-                        "UPDATE packages SET position=position+1 WHERE type_id=? AND position>=? AND id!=?",
-                        (type_id, new_pos, package_id)
-                    )
+                    if new_pos < old_pos:
+                        # Moving up: shift items in [new_pos, old_pos-1] down by 1
+                        conn.execute(
+                            "UPDATE packages SET position=position+1 WHERE type_id=? AND position>=? AND position<? AND id!=?",
+                            (type_id, new_pos, old_pos, package_id)
+                        )
+                    else:
+                        # Moving down: shift items in [old_pos+1, new_pos] up by 1
+                        conn.execute(
+                            "UPDATE packages SET position=position-1 WHERE type_id=? AND position>? AND position<=? AND id!=?",
+                            (type_id, old_pos, new_pos, package_id)
+                        )
                     conn.execute("UPDATE packages SET position=? WHERE id=?", (new_pos, package_id))
+                    # Re-normalize positions to be sequential 1,2,3...
+                    all_pkgs = conn.execute(
+                        "SELECT id FROM packages WHERE type_id=? ORDER BY position ASC, id ASC",
+                        (type_id,)
+                    ).fetchall()
+                    for idx, row in enumerate(all_pkgs, 1):
+                        conn.execute("UPDATE packages SET position=? WHERE id=?", (idx, row["id"]))
             return
         conn.execute(f"UPDATE packages SET {field}=? WHERE id=?", (value, package_id))
 
@@ -576,7 +598,8 @@ def get_purchase(purchase_id):
         return conn.execute(
             """
             SELECT pr.*, p.name AS package_name, p.volume_gb, p.duration_days, p.price,
-                   t.name AS type_name, c.service_name, c.config_text, c.inquiry_link, c.is_expired
+                   t.name AS type_name, t.description AS type_description,
+                   c.service_name, c.config_text, c.inquiry_link, c.is_expired
             FROM purchases pr
             JOIN packages p ON p.id=pr.package_id
             JOIN config_types t ON t.id=p.type_id
@@ -591,7 +614,8 @@ def get_user_purchases(user_id):
         return conn.execute(
             """
             SELECT pr.*, p.name AS package_name, p.volume_gb, p.duration_days, p.price,
-                   t.name AS type_name, c.service_name, c.config_text, c.inquiry_link, c.is_expired
+                   t.name AS type_name, t.description AS type_description,
+                   c.service_name, c.config_text, c.inquiry_link, c.is_expired
             FROM purchases pr
             JOIN packages p ON p.id=pr.package_id
             JOIN config_types t ON t.id=p.type_id
@@ -810,6 +834,7 @@ def kb_main(user_id):
         types.InlineKeyboardButton("💳 شارژ کیف پول",   callback_data="wallet:charge"),
     )
     kb.add(types.InlineKeyboardButton("🎧 ارتباط با پشتیبانی", callback_data="support"))
+    kb.add(types.InlineKeyboardButton("🤝 درخواست نمایندگی", callback_data="agency:request"))
     if is_admin(user_id):
         kb.add(types.InlineKeyboardButton("⚙️ ورود به پنل مدیریت", callback_data="admin:panel"))
     return kb
@@ -934,6 +959,11 @@ def deliver_purchase_message(chat_id, purchase_id):
     kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
     bot.send_photo(chat_id, bio, caption=text, reply_markup=kb)
+
+    # Send type description as second message if available
+    type_desc = item.get("type_description", "")
+    if type_desc:
+        bot.send_message(chat_id, f"📌 <b>توضیحات سرویس:</b>\n\n{esc(type_desc)}")
 
 def admin_purchase_notify(method_label, user_row, package_row):
     text = (
@@ -1218,6 +1248,106 @@ def _dispatch_callback(call, uid, data):
         show_support(call)
         return
 
+    # ── Agency request ────────────────────────────────────────────────────────
+    if data == "agency:request":
+        user = get_user(uid)
+        if user and user["is_agent"]:
+            bot.answer_callback_query(call.id, "شما در حال حاضر نماینده هستید.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("📤 ارسال درخواست (بدون متن)", callback_data="agency:send_empty"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        state_set(uid, "agency_request_text")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🤝 <b>درخواست نمایندگی</b>\n\n"
+            "لطفاً متن درخواست خود را ارسال کنید. موارد زیر را در متن ذکر کنید:\n\n"
+            "📊 میزان فروش شما در روز یا هفته\n"
+            "📢 کانال یا فروشگاهی که دارید (آدرس کانال تلگرام)\n"
+            "🎧 آیدی پشتیبانی مجموعه شما\n"
+            "📝 هر توضیح دیگری که لازم می‌دانید\n\n"
+            "اگر نمی‌خواهید متنی بنویسید، دکمه زیر را بزنید:", kb)
+        return
+
+    if data == "agency:send_empty":
+        state_clear(uid)
+        user = get_user(uid)
+        if user and user["is_agent"]:
+            bot.answer_callback_query(call.id, "شما در حال حاضر نماینده هستید.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "✅ درخواست نمایندگی شما ارسال شد.\n⏳ لطفاً منتظر بررسی ادمین باشید.", back_button("main"))
+        # Notify admins
+        text = (
+            f"🤝 <b>درخواست نمایندگی جدید</b>\n\n"
+            f"👤 نام: {esc(user['full_name'])}\n"
+            f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
+            f"🔢 آیدی: <code>{user['user_id']}</code>\n\n"
+            f"📝 متن درخواست: <i>بدون متن</i>"
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ تأیید", callback_data=f"agency:approve:{uid}"),
+            types.InlineKeyboardButton("❌ رد", callback_data=f"agency:reject:{uid}"),
+        )
+        for admin_id in ADMIN_IDS:
+            try:
+                bot.send_message(admin_id, text, reply_markup=kb)
+            except Exception:
+                pass
+        return
+
+    if data.startswith("agency:approve:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        target_uid = int(data.split(":")[2])
+        state_set(uid, "agency_approve_note", target_user_id=target_uid)
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⏭ بدون پیام", callback_data=f"agency:approve_now:{target_uid}"))
+        bot.send_message(call.message.chat.id,
+            f"✅ در حال تأیید نمایندگی کاربر <code>{target_uid}</code>\n\n"
+            "اگر می‌خواهید پیامی برای کاربر ارسال کنید، متن را بنویسید.\n"
+            "در غیر این صورت دکمه زیر را بزنید:", reply_markup=kb)
+        return
+
+    if data.startswith("agency:approve_now:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        target_uid = int(data.split(":")[2])
+        state_clear(uid)
+        with get_conn() as conn:
+            conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
+        bot.answer_callback_query(call.id, "✅ نمایندگی تأیید شد.")
+        _show_admin_user_detail(call, target_uid)
+        try:
+            bot.send_message(target_uid, "🎉 <b>درخواست نمایندگی شما تأیید شد!</b>\n\nاکنون شما نماینده هستید.")
+        except Exception:
+            pass
+        return
+
+    if data.startswith("agency:reject:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        target_uid = int(data.split(":")[2])
+        state_set(uid, "agency_reject_reason", target_user_id=target_uid)
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        bot.send_message(call.message.chat.id,
+            f"❌ در حال رد درخواست نمایندگی کاربر <code>{target_uid}</code>\n\n"
+            "لطفاً دلیل رد را بنویسید:")
+        return
+
     if data == "my_configs":
         bot.answer_callback_query(call.id)
         show_my_configs(call, uid)
@@ -1498,6 +1628,21 @@ def _dispatch_callback(call, uid, data):
 
     # ── Buy flow ──────────────────────────────────────────────────────────────
     if data == "buy:start":
+        # Check purchase rules
+        if setting_get("purchase_rules_enabled", "0") == "1":
+            accepted = setting_get(f"rules_accepted_{uid}", "0")
+            if accepted != "1":
+                rules_text = setting_get("purchase_rules_text", "")
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton("✅ من قوانین را خواندم و پذیرفتم", callback_data="buy:accept_rules"))
+                kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+                bot.answer_callback_query(call.id)
+                send_or_edit(call, f"📜 <b>قوانین خرید</b>\n\n{esc(rules_text)}", kb)
+                return
+        # Fall through to actual buy
+        data = "buy:start_real"
+
+    if data == "buy:start_real":
         items = get_all_types()
         kb = types.InlineKeyboardMarkup()
         has_any = False
@@ -1962,10 +2107,68 @@ def _dispatch_callback(call, uid, data):
         if not row:
             bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
             return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش نام", callback_data=f"admin:type:editname:{type_id}"))
+        kb.add(types.InlineKeyboardButton("📝 ویرایش توضیحات", callback_data=f"admin:type:editdesc:{type_id}"))
+        if row.get("description"):
+            kb.add(types.InlineKeyboardButton("🗑 حذف توضیحات", callback_data=f"admin:type:deldesc:{type_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:types"))
+        desc_preview = f"\n📝 توضیحات: {esc(row['description'][:80])}..." if row.get("description") and len(row["description"]) > 80 else (f"\n📝 توضیحات: {esc(row['description'])}" if row.get("description") else "\n📝 توضیحات: ندارد")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}", kb)
+        return
+
+    if data.startswith("admin:type:editname:"):
+        type_id = int(data.split(":")[3])
+        row     = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
         state_set(uid, "admin_edit_type", type_id=type_id)
         bot.answer_callback_query(call.id)
         send_or_edit(call, f"✏️ نام جدید برای نوع <b>{esc(row['name'])}</b> را ارسال کنید:",
                      back_button("admin:types"))
+        return
+
+    if data.startswith("admin:type:editdesc:"):
+        type_id = int(data.split(":")[3])
+        row     = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        state_set(uid, "admin_edit_type_desc", type_id=type_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⏭ توضیحاتی نمی‌خواهم وارد کنم", callback_data=f"admin:type:deldesc:{type_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin:type:edit:{type_id}"))
+        send_or_edit(call,
+            f"📝 توضیحات جدید برای نوع <b>{esc(row['name'])}</b> را ارسال کنید:\n\n"
+            "این توضیحات پس از ارسال کانفیگ به کاربر نمایش داده می‌شود.", kb)
+        return
+
+    if data == "admin:type:skipdesc":
+        sn = state_name(uid)
+        sd_val = state_data(uid)
+        if sn == "admin_add_type_desc":
+            name = sd_val.get("type_name", "")
+            try:
+                add_type(name, "")
+                state_clear(uid)
+                bot.answer_callback_query(call.id, "✅ نوع ثبت شد.")
+                bot.send_message(call.message.chat.id, "✅ نوع جدید ثبت شد.", reply_markup=kb_admin_panel())
+            except sqlite3.IntegrityError:
+                state_clear(uid)
+                bot.answer_callback_query(call.id, "⚠️ این نوع قبلاً ثبت شده.", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id)
+        return
+
+    if data.startswith("admin:type:deldesc:"):
+        type_id = int(data.split(":")[3])
+        update_type_description(type_id, "")
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "✅ توضیحات حذف شد.")
+        _show_admin_types(call)
         return
 
     if data.startswith("admin:type:del:"):
@@ -2665,7 +2868,8 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
-        kb.add(types.InlineKeyboardButton("💾 بکاپ",            callback_data="admin:backup"))
+        kb.add(types.InlineKeyboardButton("� قوانین خرید",      callback_data="adm:set:rules"))
+        kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
@@ -3010,6 +3214,51 @@ def _dispatch_callback(call, uid, data):
         )
         return
 
+    # ── Admin: Purchase Rules ─────────────────────────────────────────────────
+    if data == "adm:set:rules":
+        enabled = setting_get("purchase_rules_enabled", "0")
+        kb = types.InlineKeyboardMarkup()
+        toggle_label = "🔴 غیرفعال کردن" if enabled == "1" else "🟢 فعال کردن"
+        kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:rules:toggle"))
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش متن قوانین", callback_data="adm:rules:edit"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📜 <b>قوانین خرید</b>\n\n"
+            f"وضعیت: {'🟢 فعال' if enabled == '1' else '🔴 غیرفعال'}\n\n"
+            "وقتی فعال باشد، کاربر قبل از اولین خرید باید قوانین را بپذیرد.", kb)
+        return
+
+    if data == "adm:rules:toggle":
+        enabled = setting_get("purchase_rules_enabled", "0")
+        setting_set("purchase_rules_enabled", "0" if enabled == "1" else "1")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:rules")
+        return
+
+    if data == "adm:rules:edit":
+        state_set(uid, "admin_edit_rules_text")
+        bot.answer_callback_query(call.id)
+        current_text = setting_get("purchase_rules_text", "")
+        preview = f"\n\n📝 متن فعلی:\n{esc(current_text[:200])}..." if len(current_text) > 200 else (f"\n\n📝 متن فعلی:\n{esc(current_text)}" if current_text else "")
+        send_or_edit(call,
+            f"✏️ <b>ویرایش متن قوانین خرید</b>{preview}\n\n"
+            "متن جدید قوانین خرید را ارسال کنید:",
+            back_button("adm:set:rules"))
+        return
+
+    if data == "buy:accept_rules":
+        # User accepted rules, mark and proceed to buy
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (f"rules_accepted_{uid}", "1")
+            )
+        bot.answer_callback_query(call.id)
+        # Proceed to buy flow
+        _fake_call(call, "buy:start_real")
+        return
+
     # ── Admin: Backup ─────────────────────────────────────────────────────────
     if data == "admin:backup":
         enabled  = setting_get("backup_enabled", "0")
@@ -3177,6 +3426,39 @@ def _show_admin_user_detail(call, user_id):
         kb.add(types.InlineKeyboardButton("🏷 قیمت‌های نمایندگی", callback_data=f"adm:usr:agp:{uid_t}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
     send_or_edit(call, text, kb)
+
+def _show_admin_user_detail_msg(chat_id, user_id):
+    """Send user detail as a new message (for use from message handlers)."""
+    row = get_user_detail(user_id)
+    if not row:
+        bot.send_message(chat_id, "کاربر یافت نشد.", reply_markup=back_button("admin:users"))
+        return
+    status_label = "🔘 امن" if row["status"] == "safe" else "⚠️ ناامن"
+    agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
+    text = (
+        "👤 <b>اطلاعات کاربر</b>\n\n"
+        f"📱 نام: {esc(row['full_name'])}\n"
+        f"🆔 نام کاربری: {esc(display_username(row['username']))}\n"
+        f"🔢 آیدی: <code>{row['user_id']}</code>\n"
+        f"💰 موجودی: <b>{fmt_price(row['balance'])}</b> تومان\n"
+        f"🛍 تعداد خرید: <b>{row['purchase_count']}</b>\n"
+        f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
+        f"🕒 عضویت: {esc(row['joined_at'])}\n"
+        f"وضعیت: {status_label}\n"
+        f"نمایندگی: {agent_label}"
+    )
+    uid_t = row["user_id"]
+    kb    = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton(f"🔄 {status_label}",    callback_data=f"adm:usr:sts:{uid_t}"),
+        types.InlineKeyboardButton(f"🤝 نمایندگی",          callback_data=f"adm:usr:ag:{uid_t}"),
+    )
+    kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
+    if row["is_agent"]:
+        kb.add(types.InlineKeyboardButton("🏷 قیمت‌های نمایندگی", callback_data=f"adm:usr:agp:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
+    bot.send_message(chat_id, text, reply_markup=kb)
 
 def _show_admin_assign_config_type(call, target_id):
     items = get_all_types()
@@ -3348,11 +3630,25 @@ def universal_handler(message):
             if not name:
                 bot.send_message(uid, "⚠️ نام نوع نمی‌تواند خالی باشد.", reply_markup=back_button("admin:types"))
                 return
+            state_set(uid, "admin_add_type_desc", type_name=name)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ توضیحاتی نمی‌خواهم وارد کنم", callback_data="admin:type:skipdesc"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:types"))
+            bot.send_message(uid,
+                f"📝 توضیحات نوع <b>{esc(name)}</b> را وارد کنید:\n\n"
+                "این توضیحات پس از ارسال کانفیگ به کاربر نمایش داده می‌شود.\n"
+                "اگر نمی‌خواهید توضیحاتی وارد کنید، دکمه زیر را بزنید:", reply_markup=kb)
+            return
+
+        if sn == "admin_add_type_desc" and is_admin(uid):
+            desc = (message.text or "").strip()
+            name = sd["type_name"]
             try:
-                add_type(name)
+                add_type(name, desc)
                 state_clear(uid)
                 bot.send_message(uid, "✅ نوع جدید ثبت شد.", reply_markup=kb_admin_panel())
             except sqlite3.IntegrityError:
+                state_clear(uid)
                 bot.send_message(uid, "⚠️ این نوع قبلاً ثبت شده است.", reply_markup=back_button("admin:types"))
             return
 
@@ -3364,6 +3660,13 @@ def universal_handler(message):
             update_type(sd["type_id"], new_name)
             state_clear(uid)
             bot.send_message(uid, "✅ نوع با موفقیت ویرایش شد.", reply_markup=kb_admin_panel())
+            return
+
+        if sn == "admin_edit_type_desc" and is_admin(uid):
+            desc = (message.text or "").strip()
+            update_type_description(sd["type_id"], desc)
+            state_clear(uid)
+            bot.send_message(uid, "✅ توضیحات نوع با موفقیت ویرایش شد.", reply_markup=kb_admin_panel())
             return
 
         # ── Admin: Package add ─────────────────────────────────────────────────
@@ -3853,6 +4156,74 @@ def universal_handler(message):
             finish_card_payment_approval(payment_id, note, approved=False)
             state_clear(uid)
             bot.send_message(uid, "✅ درخواست با موفقیت رد شد.", reply_markup=kb_admin_panel())
+            return
+
+        # ── Agency request text ────────────────────────────────────────────────
+        if sn == "agency_request_text":
+            req_text = (message.text or "").strip() or "بدون متن"
+            state_clear(uid)
+            user = get_user(uid)
+            bot.send_message(uid, "✅ درخواست نمایندگی شما ارسال شد.\n⏳ لطفاً منتظر بررسی ادمین باشید.",
+                             reply_markup=kb_main(uid))
+            text = (
+                f"🤝 <b>درخواست نمایندگی جدید</b>\n\n"
+                f"👤 نام: {esc(user['full_name'])}\n"
+                f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
+                f"🔢 آیدی: <code>{user['user_id']}</code>\n\n"
+                f"📝 متن درخواست:\n{esc(req_text)}"
+            )
+            admin_kb = types.InlineKeyboardMarkup()
+            admin_kb.row(
+                types.InlineKeyboardButton("✅ تأیید", callback_data=f"agency:approve:{uid}"),
+                types.InlineKeyboardButton("❌ رد", callback_data=f"agency:reject:{uid}"),
+            )
+            for admin_id in ADMIN_IDS:
+                try:
+                    bot.send_message(admin_id, text, reply_markup=admin_kb)
+                except Exception:
+                    pass
+            return
+
+        # ── Agency approval note ───────────────────────────────────────────────
+        if sn == "agency_approve_note" and is_admin(uid):
+            note = (message.text or "").strip()
+            target_uid = sd["target_user_id"]
+            state_clear(uid)
+            with get_conn() as conn:
+                conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
+            bot.send_message(uid, "✅ نمایندگی تأیید شد.")
+            _show_admin_user_detail_msg(uid, target_uid)
+            try:
+                msg = "🎉 <b>درخواست نمایندگی شما تأیید شد!</b>\n\nاکنون شما نماینده هستید."
+                if note:
+                    msg += f"\n\n📝 پیام ادمین:\n{esc(note)}"
+                bot.send_message(target_uid, msg)
+            except Exception:
+                pass
+            return
+
+        # ── Agency rejection reason ────────────────────────────────────────────
+        if sn == "agency_reject_reason" and is_admin(uid):
+            reason = (message.text or "").strip() or "بدون دلیل"
+            target_uid = sd["target_user_id"]
+            state_clear(uid)
+            bot.send_message(uid, "✅ درخواست نمایندگی رد شد.", reply_markup=kb_admin_panel())
+            try:
+                bot.send_message(target_uid,
+                    f"❌ <b>درخواست نمایندگی شما رد شد.</b>\n\n📝 دلیل:\n{esc(reason)}")
+            except Exception:
+                pass
+            return
+
+        # ── Admin: Edit rules text ─────────────────────────────────────────────
+        if sn == "admin_edit_rules_text" and is_admin(uid):
+            text_val = (message.text or "").strip()
+            if not text_val:
+                bot.send_message(uid, "⚠️ متن خالی مجاز نیست.", reply_markup=back_button("adm:set:rules"))
+                return
+            setting_set("purchase_rules_text", text_val)
+            state_clear(uid)
+            bot.send_message(uid, "✅ متن قوانین خرید ذخیره شد.", reply_markup=back_button("adm:set:rules"))
             return
 
     except Exception as e:
