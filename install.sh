@@ -2,8 +2,10 @@
 set -Eeuo pipefail
 
 REPO="https://github.com/Emadhabibnia1385/ConfigFlow.git"
-DIR="/opt/configflow"
-SERVICE="configflow"
+BASE_DIR="/opt/configflow"
+BASE_SERVICE="configflow"
+DIR=""
+SERVICE=""
 
 R='\033[31m'; G='\033[32m'; Y='\033[33m'; C='\033[36m'; M='\033[35m'; B='\033[1m'; W='\033[97m'; N='\033[0m'
 
@@ -221,23 +223,69 @@ show_menu() {
   echo ""
 }
 
+list_instances() {
+  local found=0
+  echo -e "${C}┌──────────────────────────────────────┐${N}"
+  echo -e "${C}│${N}     ${B}${W}📋 Installed Instances${N}             ${C}│${N}"
+  echo -e "${C}├──────────────────────────────────────┤${N}"
+  for d in /opt/configflow-*/; do
+    [[ -d "$d" ]] || continue
+    local name="$(basename "$d")"
+    local svc="${name}"
+    local status="⚪"
+    if systemctl is-active "$svc" >/dev/null 2>&1; then
+      status="${G}🟢 running${N}"
+    else
+      status="${R}🔴 stopped${N}"
+    fi
+    echo -e "${C}│${N}  ${B}${name}${N}  $status  ${C}│${N}"
+    found=1
+  done
+  if [[ $found -eq 0 ]]; then
+    echo -e "${C}│${N}  ${Y}No instances installed yet${N}          ${C}│${N}"
+  fi
+  echo -e "${C}└──────────────────────────────────────┘${N}"
+  echo ""
+}
+
+select_instance() {
+  echo ""
+  list_instances
+  echo -e "${Y}📌 Enter instance number (e.g. 1, 2, 3, ...) to manage that bot.${N}"
+  echo -e "${Y}   Each number creates a separate bot with its own config & database.${N}"
+  echo ""
+  read -r -p "$(echo -e "${B}🔢 Instance number: ${N}")" INSTANCE_NUM
+  INSTANCE_NUM="${INSTANCE_NUM// /}"
+  [[ "$INSTANCE_NUM" =~ ^[0-9]+$ ]] || err "Instance number must be a positive number (e.g. 1, 2, 3)"
+  [[ "$INSTANCE_NUM" -ge 1 ]] || err "Instance number must be >= 1"
+
+  DIR="${BASE_DIR}-${INSTANCE_NUM}"
+  SERVICE="${BASE_SERVICE}-${INSTANCE_NUM}"
+  echo ""
+  ok "Selected instance: ${B}#${INSTANCE_NUM}${N}  (dir: $DIR  service: $SERVICE)"
+  echo ""
+}
+
 main() {
   check_root
   ensure_safe_cwd
+  select_instance
 
   while true; do
     header
+    echo -e "  ${B}${M}Instance #${INSTANCE_NUM}${N}  —  dir: ${W}$DIR${N}  service: ${W}$SERVICE${N}"
+    echo ""
     show_menu
 
-    read -r -p "$(echo -e "${C}ConfigFlow${N} ${B}➜${N} Select option ${W}[0-9]${N}: ")" choice
+    read -r -p "$(echo -e "${C}ConfigFlow #${INSTANCE_NUM}${N} ${B}➜${N} Select option ${W}[0-9]${N}: ")" choice
 
     case "${choice:-}" in
       1) install_bot ;;
       2) update_bot ;;
       3) edit_config ;;
-      4) systemctl start "$SERVICE"; ok "Bot started"; read -r -p "Press Enter to continue...";;
-      5) systemctl stop "$SERVICE"; ok "Bot stopped"; read -r -p "Press Enter to continue...";;
-      6) systemctl restart "$SERVICE"; ok "Bot restarted"; read -r -p "Press Enter to continue...";;
+      4) systemctl start "$SERVICE"; ok "Bot #${INSTANCE_NUM} started"; read -r -p "Press Enter to continue...";;
+      5) systemctl stop "$SERVICE"; ok "Bot #${INSTANCE_NUM} stopped"; read -r -p "Press Enter to continue...";;
+      6) systemctl restart "$SERVICE"; ok "Bot #${INSTANCE_NUM} restarted"; read -r -p "Press Enter to continue...";;
       7) echo -e "${Y}Press Ctrl+C to exit logs${N}"; sleep 1; journalctl -u "$SERVICE" -f;;
       8) systemctl status "$SERVICE" --no-pager -l; read -r -p "Press Enter to continue...";;
       9) remove_bot; read -r -p "Press Enter to continue...";;
