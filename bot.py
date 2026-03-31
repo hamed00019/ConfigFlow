@@ -800,11 +800,10 @@ def kb_main(user_id):
 def kb_admin_panel():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
-        types.InlineKeyboardButton("🧩 مدیریت نوع‌ها",    callback_data="admin:types"),
-        types.InlineKeyboardButton("📦 مدیریت پکیج‌ها",   callback_data="admin:packages"),
+        types.InlineKeyboardButton("🧩 مدیریت نوع و پکیج‌ها", callback_data="admin:types"),
+        types.InlineKeyboardButton("📝 ثبت کانفیگ",       callback_data="admin:add_config"),
     )
     kb.row(
-        types.InlineKeyboardButton("📝 ثبت کانفیگ",       callback_data="admin:add_config"),
         types.InlineKeyboardButton("📚 کانفیگ‌های ثبت‌شده", callback_data="admin:stock"),
     )
     kb.row(
@@ -1609,10 +1608,10 @@ def _dispatch_callback(call, uid, data):
             "⚙️ <b>پنل مدیریت</b>\n\n"
             "بخش مورد نظر را انتخاب کنید:\n\n"
             "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-            "💡 <b>ConfigFlow</b> | پروژه متن‌باز\n"
-            "👨‍💻 توسعه‌دهنده: @Emad_Habibnia\n"
+            "💡 <b>ConfigFlow</b> \n"
+            "👨‍💻 Developer: @Emad_Habibnia\n"
             "🌐 <a href='https://github.com/Emadhabibnia1385/ConfigFlow'>GitHub ConfigFlow</a>\n"
-            "❤️ <a href='https://t.me/EmadHabibnia/4'>حمایت از پروژه و دونیت</a>"
+            "❤️ <a href='https://t.me/EmadHabibnia/4'>doneit/a>"
         )
         send_or_edit(call, text, kb_admin_panel())
         return
@@ -1648,29 +1647,13 @@ def _dispatch_callback(call, uid, data):
         _show_admin_types(call)
         return
 
-    # ── Admin: Packages ───────────────────────────────────────────────────────
-    if data == "admin:packages":
-        _show_admin_packages(call)
-        bot.answer_callback_query(call.id)
-        return
-
-    if data == "admin:pkg:add":
-        types_list = get_all_types()
-        kb = types.InlineKeyboardMarkup()
-        for item in types_list:
-            kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"admin:pkg:add:t:{item['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:packages"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call, "📦 <b>افزودن پکیج</b>\n\nنوع کانفیگ را انتخاب کنید:", kb)
-        return
-
     if data.startswith("admin:pkg:add:t:"):
         type_id  = int(data.split(":")[4])
         type_row = get_type(type_id)
         state_set(uid, "admin_add_package_name", type_id=type_id)
         bot.answer_callback_query(call.id)
         send_or_edit(call, f"✏️ نام پکیج برای نوع <b>{esc(type_row['name'])}</b> را وارد کنید:",
-                     back_button("admin:packages"))
+                     back_button("admin:types"))
         return
 
     if data.startswith("admin:pkg:edit:"):
@@ -1684,7 +1667,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
         kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
         kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:packages"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:types"))
         bot.answer_callback_query(call.id)
         text = (
             f"📦 <b>ویرایش پکیج</b>\n\n"
@@ -1704,7 +1687,7 @@ def _dispatch_callback(call, uid, data):
         labels     = {"name": "نام", "price": "قیمت (تومان)", "volume": "حجم (GB)", "dur": "مدت (روز)"}
         bot.answer_callback_query(call.id)
         send_or_edit(call, f"✏️ مقدار جدید برای <b>{labels.get(field_key, field_key)}</b> را وارد کنید:",
-                     back_button("admin:packages"))
+                     back_button("admin:types"))
         return
 
     if data.startswith("admin:pkg:del:"):
@@ -1726,7 +1709,7 @@ def _dispatch_callback(call, uid, data):
                 return
         delete_package(package_id)
         bot.answer_callback_query(call.id, "پکیج حذف شد.")
-        _show_admin_packages(call)
+        _show_admin_types(call)
         return
 
     # ── Admin: Add Config ─────────────────────────────────────────────────────
@@ -2617,28 +2600,24 @@ def _dispatch_callback(call, uid, data):
 def _show_admin_types(call):
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("➕ افزودن نوع جدید", callback_data="admin:type:add"))
-    for item in get_all_types():
+    all_types = get_all_types()
+    for item in all_types:
         kb.row(
             types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data="noop"),
             types.InlineKeyboardButton("✏️", callback_data=f"admin:type:edit:{item['id']}"),
             types.InlineKeyboardButton("🗑",  callback_data=f"admin:type:del:{item['id']}"),
         )
+        kb.add(types.InlineKeyboardButton(f"➕ افزودن پکیج برای {item['name']}", callback_data=f"admin:pkg:add:t:{item['id']}"))
+        packs = get_packages(type_id=item['id'], include_inactive=False)
+        for p in packs:
+            kb.row(
+                types.InlineKeyboardButton(f"📦 {p['name']} | {p['volume_gb']}GB | {fmt_price(p['price'])}ت",
+                                           callback_data="noop"),
+                types.InlineKeyboardButton("✏️", callback_data=f"admin:pkg:edit:{p['id']}"),
+                types.InlineKeyboardButton("🗑",  callback_data=f"admin:pkg:del:{p['id']}"),
+            )
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
-    send_or_edit(call, "🧩 <b>مدیریت نوع‌ها</b>", kb)
-
-def _show_admin_packages(call):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("➕ افزودن پکیج", callback_data="admin:pkg:add"))
-    rows = get_packages(include_inactive=False)
-    for p in rows:
-        kb.row(
-            types.InlineKeyboardButton(f"📦 {p['name']} | {p['volume_gb']}GB | {fmt_price(p['price'])}ت",
-                                       callback_data="noop"),
-            types.InlineKeyboardButton("✏️", callback_data=f"admin:pkg:edit:{p['id']}"),
-            types.InlineKeyboardButton("🗑",  callback_data=f"admin:pkg:del:{p['id']}"),
-        )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
-    send_or_edit(call, "📦 <b>مدیریت پکیج‌ها</b>", kb)
+    send_or_edit(call, "🧩 <b>مدیریت نوع و پکیج‌ها</b>", kb)
 
 def _show_admin_stock(call):
     rows = get_registered_packages_stock()
@@ -2884,38 +2863,38 @@ def universal_handler(message):
         if sn == "admin_add_package_name" and is_admin(uid):
             name = (message.text or "").strip()
             if not name:
-                bot.send_message(uid, "⚠️ نام پکیج معتبر وارد کنید.", reply_markup=back_button("admin:packages"))
+                bot.send_message(uid, "⚠️ نام پکیج معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                 return
             state_set(uid, "admin_add_package_volume", type_id=sd["type_id"], package_name=name)
-            bot.send_message(uid, "🔋 حجم پکیج را به گیگ وارد کنید:", reply_markup=back_button("admin:packages"))
+            bot.send_message(uid, "🔋 حجم پکیج را به گیگ وارد کنید:", reply_markup=back_button("admin:types"))
             return
 
         if sn == "admin_add_package_volume" and is_admin(uid):
             volume = parse_int(message.text or "")
             if volume is None or volume < 0:
-                bot.send_message(uid, "⚠️ حجم معتبر وارد کنید.", reply_markup=back_button("admin:packages"))
+                bot.send_message(uid, "⚠️ حجم معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                 return
             state_set(uid, "admin_add_package_duration",
                       type_id=sd["type_id"], package_name=sd["package_name"], volume=volume)
-            bot.send_message(uid, "⏰ مدت پکیج را به روز وارد کنید:", reply_markup=back_button("admin:packages"))
+            bot.send_message(uid, "⏰ مدت پکیج را به روز وارد کنید:", reply_markup=back_button("admin:types"))
             return
 
         if sn == "admin_add_package_duration" and is_admin(uid):
             duration = parse_int(message.text or "")
             if duration is None or duration < 0:
-                bot.send_message(uid, "⚠️ مدت معتبر وارد کنید.", reply_markup=back_button("admin:packages"))
+                bot.send_message(uid, "⚠️ مدت معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                 return
             state_set(uid, "admin_add_package_price",
                       type_id=sd["type_id"], package_name=sd["package_name"],
                       volume=sd["volume"], duration=duration)
             bot.send_message(uid, "💰 قیمت پکیج را به تومان وارد کنید.\nبرای تست رایگان عدد <b>0</b> بفرستید:",
-                             reply_markup=back_button("admin:packages"))
+                             reply_markup=back_button("admin:types"))
             return
 
         if sn == "admin_add_package_price" and is_admin(uid):
             price = parse_int(message.text or "")
             if price is None or price < 0:
-                bot.send_message(uid, "⚠️ قیمت معتبر وارد کنید.", reply_markup=back_button("admin:packages"))
+                bot.send_message(uid, "⚠️ قیمت معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                 return
             add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], price)
             state_clear(uid)
@@ -2931,13 +2910,13 @@ def universal_handler(message):
             raw        = (message.text or "").strip()
             if field_key == "name":
                 if not raw:
-                    bot.send_message(uid, "⚠️ نام معتبر وارد کنید.", reply_markup=back_button("admin:packages"))
+                    bot.send_message(uid, "⚠️ نام معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                     return
                 update_package_field(package_id, db_field, raw)
             else:
                 val = parse_int(raw)
                 if val is None or val < 0:
-                    bot.send_message(uid, "⚠️ مقدار عددی معتبر وارد کنید.", reply_markup=back_button("admin:packages"))
+                    bot.send_message(uid, "⚠️ مقدار عددی معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                     return
                 update_package_field(package_id, db_field, val)
             state_clear(uid)
