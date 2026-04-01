@@ -653,7 +653,8 @@ def get_registered_packages_stock():
             SELECT p.id, p.name, p.volume_gb, p.duration_days, p.price, t.name AS type_name,
                    COUNT(c.id) FILTER (WHERE c.sold_to IS NULL AND c.reserved_payment_id IS NULL AND c.is_expired=0) AS stock,
                    COUNT(c.id) FILTER (WHERE c.sold_to IS NOT NULL) AS sold_count,
-                   COUNT(c.id) FILTER (WHERE c.is_expired=1) AS expired_count
+                   COUNT(c.id) FILTER (WHERE c.is_expired=1) AS expired_count,
+                   (SELECT COUNT(*) FROM pending_orders po WHERE po.package_id=p.id AND po.status='waiting') AS pending_count
             FROM packages p
             JOIN config_types t ON t.id=p.type_id
             LEFT JOIN configs c ON c.package_id=p.id
@@ -1178,12 +1179,12 @@ def deliver_purchase_message(chat_id, purchase_id):
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-    bot.send_photo(chat_id, bio, caption=text, reply_markup=kb)
+    bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
 
     # Send type description as second message if available
     type_desc = item.get("type_description", "")
     if type_desc:
-        bot.send_message(chat_id, f"📌 <b>توضیحات سرویس:</b>\n\n{esc(type_desc)}")
+        bot.send_message(chat_id, f"📌 <b>توضیحات سرویس:</b>\n\n{esc(type_desc)}", parse_mode="HTML")
 
 def admin_purchase_notify(method_label, user_row, package_row):
     text = (
@@ -1317,15 +1318,22 @@ def auto_fulfill_pending_orders(package_id):
             bot.send_message(
                 user_id,
                 "🎉 <b>کانفیگ شما آماده شد!</b>\n\n"
-                "سفارش شما تکمیل شد. جزئیات سرویس در ادامه ارسال می‌شود."
+                "سفارش شما تکمیل شد. جزئیات سرویس در ادامه ارسال می‌شود.",
+                parse_mode="HTML"
             )
         except Exception:
             pass
-        deliver_purchase_message(user_id, purchase_id)
-        pkg = get_package(package_id)
-        user = get_user(user_id)
-        if pkg and user:
-            admin_purchase_notify(p_row["payment_method"], user, pkg)
+        try:
+            deliver_purchase_message(user_id, purchase_id)
+        except Exception:
+            pass
+        try:
+            pkg = get_package(package_id)
+            user = get_user(user_id)
+            if pkg and user:
+                admin_purchase_notify(p_row["payment_method"], user, pkg)
+        except Exception:
+            pass
         fulfilled_count += 1
     return fulfilled_count
 
@@ -4342,8 +4350,10 @@ def _show_admin_stock(call):
         types.InlineKeyboardButton(f"❌ کل منقضی ({total_expired})", callback_data="adm:stk:all:ex:0"),
     )
     for row in rows:
+        pending_c = row['pending_count'] if row['pending_count'] else 0
+        pending_label = f" ⏳{pending_c}" if pending_c > 0 else ""
         kb.add(types.InlineKeyboardButton(
-            f"📦 {row['type_name']} - {row['name']} | 🟢{row['stock']} 🔴{row['sold_count']} ❌{row['expired_count']}",
+            f"📦 {row['type_name']} - {row['name']} | 🟢{row['stock']} 🔴{row['sold_count']} ❌{row['expired_count']}{pending_label}",
             callback_data=f"adm:stk:pk:{row['id']}"
         ))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
