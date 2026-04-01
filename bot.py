@@ -1305,14 +1305,27 @@ def auto_fulfill_pending_orders(package_id):
         if not available:
             break  # No more stock
         cfg = available[0]
-        user_id = p_row["user_id"]
+        user_id    = p_row["user_id"]
         pending_id = p_row["id"]
-        # Assign config to user
-        purchase_id = assign_config_to_user(
-            cfg["id"], user_id, package_id,
-            p_row["amount"], p_row["payment_method"], is_test=0
-        )
-        fulfill_pending_order(pending_id)
+        # Assign config to user — wrap in per-iteration try/except so one failure
+        # doesn't block other pending orders
+        try:
+            purchase_id = assign_config_to_user(
+                cfg["id"], user_id, package_id,
+                p_row["amount"], p_row["payment_method"], is_test=0
+            )
+            fulfill_pending_order(pending_id)
+        except Exception as e:
+            for admin_id in ADMIN_IDS:
+                try:
+                    bot.send_message(
+                        admin_id,
+                        f"⚠️ خطا در تحویل سفارش #{pending_id} به کاربر {user_id}:\n<code>{e}</code>",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+            continue  # Try next pending order
         # Notify user
         try:
             bot.send_message(
@@ -1328,7 +1341,7 @@ def auto_fulfill_pending_orders(package_id):
         except Exception:
             pass
         try:
-            pkg = get_package(package_id)
+            pkg  = get_package(package_id)
             user = get_user(user_id)
             if pkg and user:
                 admin_purchase_notify(p_row["payment_method"], user, pkg)
@@ -3082,21 +3095,64 @@ def _dispatch_callback(call, uid, data):
                 "SELECT COUNT(*) AS n FROM configs WHERE package_id=? AND is_expired=1",
                 (package_id,)
             ).fetchone()["n"]
+            pending_c = conn.execute(
+                "SELECT COUNT(*) AS n FROM pending_orders WHERE package_id=? AND status='waiting'",
+                (package_id,)
+            ).fetchone()["n"]
         kb    = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton(f"🟢 مانده ({avail})",       callback_data=f"adm:stk:av:{package_id}:0"),
             types.InlineKeyboardButton(f"🔴 فروخته ({sold})",       callback_data=f"adm:stk:sl:{package_id}:0"),
         )
         kb.add(types.InlineKeyboardButton(f"❌ منقضی ({expired})",  callback_data=f"adm:stk:ex:{package_id}:0"))
+        if pending_c > 0:
+            kb.add(types.InlineKeyboardButton(
+                f"⏳ تحویل {pending_c} سفارش در انتظار",
+                callback_data=f"adm:stk:fulfill:{package_id}"
+            ))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:stock"))
         bot.answer_callback_query(call.id)
+        pending_line = f"\n⏳ سفارش در انتظار: {pending_c}" if pending_c > 0 else ""
         text = (
             f"📦 <b>{esc(package_row['name'])}</b>\n\n"
             f"🟢 موجود: {avail}\n"
             f"🔴 فروخته شده: {sold}\n"
             f"❌ منقضی شده: {expired}"
+            f"{pending_line}"
         )
         send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:stk:fulfill:"):
+        package_id  = int(data.split(":")[3])
+        package_row = get_package(package_id)
+        bot.answer_callback_query(call.id, "⏳ در حال تحویل سفارش‌ها...")
+        try:
+            fulfilled = auto_fulfill_pending_orders(package_id)
+            if fulfilled > 0:
+                send_or_edit(call,
+                    f"✅ <b>{fulfilled}</b> سفارش با موفقیت تحویل داده شد.",
+                    back_button(f"adm:stk:pk:{package_id}"))
+            else:
+                # Check if there are still pending orders (no stock available)
+                with get_conn() as conn:
+                    remaining = conn.execute(
+                        "SELECT COUNT(*) AS n FROM pending_orders WHERE package_id=? AND status='waiting'",
+                        (package_id,)
+                    ).fetchone()["n"]
+                if remaining > 0:
+                    send_or_edit(call,
+                        f"⚠️ <b>{remaining}</b> سفارش در انتظار وجود دارد ولی موجودی کافی نیست.\n\n"
+                        "لطفاً ابتدا کانفیگ ثبت کنید.",
+                        back_button(f"adm:stk:pk:{package_id}"))
+                else:
+                    send_or_edit(call,
+                        "✅ هیچ سفارش در انتظاری وجود ندارد.",
+                        back_button(f"adm:stk:pk:{package_id}"))
+        except Exception as e:
+            send_or_edit(call,
+                f"❌ خطا در تحویل سفارش‌ها:\n<code>{esc(str(e))}</code>",
+                back_button(f"adm:stk:pk:{package_id}"))
         return
 
     if data.startswith("adm:stk:av:") or data.startswith("adm:stk:sl:") or data.startswith("adm:stk:ex:"):
@@ -4957,16 +5013,19 @@ def universal_handler(message):
 
             # Auto-fulfill any waiting pending orders for this package
             auto_fulfilled = 0
+            auto_fulfill_err = ""
             if success_count > 0:
                 try:
                     auto_fulfilled = auto_fulfill_pending_orders(package_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    auto_fulfill_err = str(e)
 
             state_clear(uid)
             result = f"✅ <b>{success_count}</b> کانفیگ از <b>{expected}</b> با موفقیت ثبت شد."
             if auto_fulfilled > 0:
                 result += f"\n\n🚀 <b>{auto_fulfilled}</b> سفارش در انتظار به صورت خودکار تحویل داده شد."
+            if auto_fulfill_err:
+                result += f"\n\n⚠️ خطا در تحویل سفارش‌های در انتظار:\n<code>{esc(auto_fulfill_err)}</code>"
             if len(configs) != expected:
                 result += f"\n\n⚠️ تعداد ارسال‌شده ({len(configs)}) با تعداد مورد انتظار ({expected}) متفاوت است."
             if errors:
