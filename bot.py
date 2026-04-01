@@ -3067,6 +3067,16 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
+    if data.startswith("admin:users:pg:"):
+        if not (admin_has_perm(uid, "view_users") or admin_has_perm(uid, "full_users") or
+                any(admin_has_perm(uid, p) for p in PERM_USER_FULL)):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        page = int(data.split(":")[-1])
+        _show_admin_users_list(call, page=page)
+        bot.answer_callback_query(call.id)
+        return
+
     # ── Admin: User search ────────────────────────────────────────────────────
     if data == "adm:usr:search":
         state_set(uid, "admin_user_search")
@@ -4057,18 +4067,79 @@ def _show_admin_stock(call):
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
     send_or_edit(call, "📁 <b>کانفیگ‌ها</b>", kb)
 
-def _show_admin_users_list(call):
+def _show_admin_admins_panel(call):
+    admins = get_all_admin_users()
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("➕ افزودن ادمین جدید", callback_data="adm:mgr:add"))
+    for row in admins:
+        user_row = get_user(row["user_id"])
+        name = user_row["full_name"] if user_row else f"کاربر {row['user_id']}"
+        kb.add(types.InlineKeyboardButton(
+            f"👮 {name} | {row['user_id']}",
+            callback_data=f"adm:mgr:v:{row['user_id']}"
+        ))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    count = len(admins)
+    text = (
+        f"👮 <b>مدیریت ادمین‌ها</b>\n\n"
+        f"تعداد ادمین‌های ثبت‌شده: <b>{count}</b>\n\n"
+        "برای مشاهده یا ویرایش دسترسی هر ادمین روی نام آن کلیک کنید."
+    )
+    send_or_edit(call, text, kb)
+
+
+def _show_perm_selection(call, uid, target_id, perms, edit_mode=False):
+    user_row = get_user(target_id)
+    name = user_row["full_name"] if user_row else f"کاربر {target_id}"
+    text = (
+        f"🔑 <b>انتخاب سطح دسترسی</b>\n\n"
+        f"👤 کاربر: {esc(name)} (<code>{target_id}</code>)\n\n"
+        "سطح دسترسی‌های مورد نظر را انتخاب کنید:\n"
+        "(هر گزینه را بزنید تا فعال/غیرفعال شود)"
+    )
+    kb = types.InlineKeyboardMarkup()
+    for perm_key, perm_label in ADMIN_PERMS:
+        checked = bool(perms.get(perm_key))
+        icon = "✅" if checked else "⬜️"
+        kb.add(types.InlineKeyboardButton(
+            f"{icon} {perm_label}",
+            callback_data=f"adm:mgr:pt:{perm_key}"
+        ))
+    action_label = "💾 ذخیره تغییرات" if edit_mode else "➕ افزودن ادمین"
+    kb.add(types.InlineKeyboardButton(action_label, callback_data="adm:mgr:confirm"))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:admins"))
+    send_or_edit(call, text, kb)
+
+
+def _show_admin_users_list(call, page=0):
     rows  = get_users()
     total = count_all_users()
-    kb    = types.InlineKeyboardMarkup()
+    # Sort alphabetically (A-Z, case-insensitive)
+    rows  = sorted(rows, key=lambda r: (r["full_name"] or "").lower())
+    per_page    = 10
+    total_pages = max(1, (len(rows) + per_page - 1) // per_page)
+    page        = max(0, min(page, total_pages - 1))
+    page_rows   = rows[page * per_page:(page + 1) * per_page]
+    kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("🔍 جستجوی کاربر", callback_data="adm:usr:search"))
-    for row in rows[:100]:
+    for row in page_rows:
         status_icon = "🔘" if row["status"] == "safe" else "⚠️"
         agent_icon  = "🤝" if row["is_agent"] else ""
         label = f"{status_icon}{agent_icon} {row['full_name']} | {display_username(row['username'])}"
         kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:v:{row['user_id']}"))
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton("⬅️ قبلی", callback_data=f"admin:users:pg:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(types.InlineKeyboardButton("➡️ بعدی", callback_data=f"admin:users:pg:{page + 1}"))
+    if nav:
+        kb.row(*nav)
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
-    send_or_edit(call, f"👥 <b>مدیریت کاربران</b>\n\n👤 تعداد کل کاربران: <b>{total}</b> نفر", kb)
+    send_or_edit(call,
+        f"👥 <b>مدیریت کاربران</b>\n\n"
+        f"👤 تعداد کل کاربران: <b>{total}</b> نفر\n"
+        f"📄 صفحه {page + 1} از {total_pages}",
+        kb)
 
 def _show_admin_user_detail(call, user_id):
     row = get_user_detail(user_id)
@@ -4830,6 +4901,38 @@ def universal_handler(message):
                 state_clear(uid)
                 bot.send_message(uid, f"✅ قیمت اختصاصی {fmt_price(val)} تومان ثبت شد.",
                                  reply_markup=kb_admin_panel())
+            return
+
+        # ── Admin: Add admin — resolve user ID ────────────────────────────────
+        if sn == "admin_mgr_await_id" and uid in ADMIN_IDS:
+            raw = (message.text or "").strip()
+            target_id = None
+            # Try numeric ID first
+            if raw.lstrip("-").isdigit():
+                target_id = int(raw)
+            else:
+                # Try username lookup (remove leading @)
+                uname = raw.lstrip("@").lower()
+                with get_conn() as conn:
+                    row_u = conn.execute(
+                        "SELECT user_id FROM users WHERE LOWER(username)=? LIMIT 1",
+                        (uname,)
+                    ).fetchone()
+                if row_u:
+                    target_id = row_u["user_id"]
+            if not target_id:
+                bot.send_message(uid,
+                    "⚠️ کاربر یافت نشد. آیدی عددی یا یوزرنیم را دقیق وارد کنید.",
+                    reply_markup=back_button("admin:admins"))
+                return
+            if target_id in ADMIN_IDS:
+                bot.send_message(uid,
+                    "⚠️ این کاربر اونر است و نیاز به ثبت ادمین ندارد.",
+                    reply_markup=back_button("admin:admins"))
+                state_clear(uid)
+                return
+            state_set(uid, "admin_mgr_select_perms", target_user_id=target_id, perms="{}")
+            _show_perm_selection(message, uid, target_id, {}, edit_mode=False)
             return
 
         # ── Admin: Payment approval ────────────────────────────────────────────
