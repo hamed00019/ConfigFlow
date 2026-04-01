@@ -273,6 +273,16 @@ def init_db():
                 added_at    TEXT    NOT NULL,
                 permissions TEXT    NOT NULL DEFAULT '{}'
             );
+            CREATE TABLE IF NOT EXISTS pending_orders (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL,
+                package_id     INTEGER NOT NULL,
+                payment_id     INTEGER,
+                amount         INTEGER NOT NULL,
+                payment_method TEXT    NOT NULL,
+                created_at     TEXT    NOT NULL,
+                status         TEXT    NOT NULL DEFAULT 'waiting'
+            );
         """)
 
         defaults = {
@@ -293,6 +303,8 @@ def init_db():
             "gw_swapwallet_visibility": "public",
             "swapwallet_api_key":       "",
             "swapwallet_username":      "",
+            "shop_open":         "1",
+            "preorder_mode":     "0",
             "support_link":     "",
             "support_link_desc": "",
             "start_text":       "",
@@ -924,6 +936,23 @@ def update_admin_permissions(user_id, permissions_dict):
     with get_conn() as conn:
         conn.execute("UPDATE admin_users SET permissions=? WHERE user_id=?", (perms_json, user_id))
 
+def create_pending_order(user_id, package_id, payment_id, amount, payment_method):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO pending_orders(user_id,package_id,payment_id,amount,payment_method,created_at,status)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (user_id, package_id, payment_id, amount, payment_method, now_str(), "waiting")
+        )
+        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
+
+def get_pending_order(pending_id):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM pending_orders WHERE id=?", (pending_id,)).fetchone()
+
+def fulfill_pending_order(pending_id):
+    with get_conn() as conn:
+        conn.execute("UPDATE pending_orders SET status='fulfilled' WHERE id=?", (pending_id,))
+
 # ── Channel lock ───────────────────────────────────────────────────────────────
 def check_channel_membership(user_id):
     channel_id = setting_get("channel_id", "").strip()
@@ -1192,6 +1221,32 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
         except Exception:
             pass
 
+def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, method):
+    user = get_user(user_id)
+    text = (
+        f"⚠️ <b>سفارش در انتظار کانفیگ</b>\n\n"
+        f"👤 کاربر: {esc(user['full_name'])}\n"
+        f"🆔 آیدی: <code>{user_id}</code>\n"
+        f"💰 مبلغ: {fmt_price(amount)} تومان\n"
+        f"💳 روش پرداخت: {method}\n\n"
+        f"📦 <b>پکیج:</b>\n"
+        f"🧩 نوع: {esc(package_row['type_name'])}\n"
+        f"✏️ نام: {esc(package_row['name'])}\n"
+        f"🔋 حجم: {package_row['volume_gb']} گیگ\n"
+        f"⏰ مدت: {package_row['duration_days']} روز\n"
+        f"💰 قیمت: {fmt_price(package_row['price'])} تومان\n\n"
+        "⚠️ موجودی تحویل فوری برای این پکیج تمام شده است.\n"
+        "لطفاً برای این سفارش یک کانفیگ ثبت کنید:"
+    )
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("📝 ثبت کانفیگ برای این سفارش",
+                                       callback_data=f"adm:pending:addcfg:{pending_id}"))
+    for admin_id in ADMIN_IDS:
+        try:
+            bot.send_message(admin_id, text, reply_markup=kb)
+        except Exception:
+            pass
+
 # ── Payment helpers ────────────────────────────────────────────────────────────
 def get_effective_price(user_id, package_row):
     """Return agency price if user is agent and has a custom price, else regular price."""
@@ -1365,6 +1420,7 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
         return True
     else:
         reject_payment(payment_id, admin_note)
+
         if payment["config_id"]:
             release_reserved_config(payment["config_id"])
         bot.send_message(user_id, f"❌ رسید شما رد شد.\n\n{esc(admin_note)}")
@@ -1922,12 +1978,22 @@ def _dispatch_callback(call, uid, data):
         data = "buy:start_real"
 
     if data == "buy:start_real":
+        # Check if shop is open
+        if setting_get("shop_open", "1") != "1":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
+            return
+        stock_only = setting_get("preorder_mode", "0") == "1"
         items = get_all_types()
         kb = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
-            # Only show types that have at least one package with stock
-            packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and p['stock'] > 0]
+            if stock_only:
+                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and p['stock'] > 0]
+            else:
+                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0]
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
                 has_any = True
@@ -1940,13 +2006,18 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("buy:t:"):
-        type_id  = int(data.split(":")[2])
-        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
-        kb       = types.InlineKeyboardMarkup()
-        user     = get_user(uid)
+        type_id   = int(data.split(":")[2])
+        stock_only = setting_get("preorder_mode", "0") == "1"
+        if stock_only:
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
+        else:
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+        kb   = types.InlineKeyboardMarkup()
+        user = get_user(uid)
         for p in packages:
             price = get_effective_price(uid, p)
-            title = f"{p['name']} | {p['volume_gb']}GB | {p['duration_days']} روز | {fmt_price(price)} ت"
+            stock_tag = "" if p["stock"] > 0 else " ⏳"
+            title = f"{p['name']}{stock_tag} | {p['volume_gb']}GB | {p['duration_days']} روز | {fmt_price(price)} ت"
             kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="buy:start"))
         bot.answer_callback_query(call.id)
@@ -3480,8 +3551,9 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
-        kb.add(types.InlineKeyboardButton("� قوانین خرید",      callback_data="adm:set:rules"))
-        kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
+        kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
+        kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
+        kb.add(types.InlineKeyboardButton("💾 بکاپ",            callback_data="admin:backup"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
@@ -3529,7 +3601,51 @@ def _dispatch_callback(call, uid, data):
                      back_button("adm:set:support"))
         return
 
-    # ── Gateway settings ──────────────────────────────────────────────────────
+    # ── Shop management settings ─────────────────────────────────────────────
+    if data == "adm:set:shop":
+        shop_open     = setting_get("shop_open", "1")
+        preorder_mode = setting_get("preorder_mode", "0")
+        open_icon  = "🟢" if shop_open     == "1" else "🔴"
+        stock_icon = "🟢" if preorder_mode == "1" else "🔴"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            f"{open_icon} وضعیت فروش: {'باز' if shop_open == '1' else 'بسته'}",
+            callback_data="adm:shop:toggle_open"))
+        kb.add(types.InlineKeyboardButton(
+            f"{stock_icon} فروش بر اساس موجودی: {'فعال' if preorder_mode == '1' else 'غیرفعال'}",
+            callback_data="adm:shop:toggle_stock"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        text = (
+            "🏪 <b>مدیریت فروش</b>\n\n"
+            f"🔹 <b>وضعیت فروش:</b> {'🟢 باز' if shop_open == '1' else '🔴 بسته'}\n"
+            f"🔹 <b>فروش بر اساس موجودی:</b> {'🟢 فعال – فقط پکیج‌های دارای موجودی نمایش داده می‌شوند.' if preorder_mode == '1' else '🔴 غیرفعال – همه پکیج‌ها نمایش داده می‌شوند. در صورت نبود موجودی، سفارش به پشتیبانی ارسال می‌شود.'}"
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data == "adm:shop:toggle_open":
+        current = setting_get("shop_open", "1")
+        setting_set("shop_open", "0" if current == "1" else "1")
+        bot.answer_callback_query(call.id, "وضعیت فروش تغییر کرد.")
+        # Re-show shop settings
+        data = "adm:set:shop"
+        # fall through by calling the handler again via fake callback
+        from types import SimpleNamespace as _SN
+        fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data=data)
+        _dispatch_callback(fake, uid, data)
+        return
+
+    if data == "adm:shop:toggle_stock":
+        current = setting_get("preorder_mode", "0")
+        setting_set("preorder_mode", "0" if current == "1" else "1")
+        bot.answer_callback_query(call.id, "تنظیم فروش بر اساس موجودی تغییر کرد.")
+        from types import SimpleNamespace as _SN
+        fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data="adm:set:shop")
+        _dispatch_callback(fake, uid, "adm:set:shop")
+        return
+
+    # ── Gateway settings ─────────────────────────────────────────────────────
     if data == "adm:set:gateways":
         kb = types.InlineKeyboardMarkup()
         for gw_key, gw_label in [("card", "💳 کارت به کارت"), ("crypto", "💎 ارز دیجیتال"), ("tetrapay", "🏦 کارت به کارت آنلاین (TetraPay)"), ("swapwallet", "💎 سواپ ولت (SwapWallet)")]:
