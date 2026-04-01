@@ -2120,7 +2120,11 @@ def _dispatch_callback(call, uid, data):
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         user        = get_user(uid)
-        if not package_row or package_row["stock"] <= 0:
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        preorder_on = setting_get("preorder_mode", "0") == "1"
+        if preorder_on and package_row["stock"] <= 0:
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price = get_effective_price(uid, package_row)
@@ -2129,7 +2133,22 @@ def _dispatch_callback(call, uid, data):
             return
         config_id = reserve_first_config(package_id)
         if not config_id:
-            bot.answer_callback_query(call.id, "فعلاً کانفیگی موجود نیست.", show_alert=True)
+            if preorder_on:
+                bot.answer_callback_query(call.id, "فعلاً کانفیگی موجود نیست.", show_alert=True)
+                return
+            # preorder_mode OFF — deduct balance, create pending order, notify admin
+            update_balance(uid, -price)
+            payment_id = create_payment("config_purchase", uid, package_id, price, "wallet", status="completed")
+            complete_payment(payment_id)
+            pending_id = create_pending_order(uid, package_id, payment_id, price, "wallet")
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "✅ پرداخت شما از کیف پول انجام شد.\n\n"
+                "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
+                "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
+                "🙏 از صبر شما متشکریم.", back_button("main"))
+            notify_pending_order_to_admins(pending_id, uid, package_row, price, "wallet")
+            state_clear(uid)
             return
         update_balance(uid, -price)
         purchase_id = assign_config_to_user(config_id, uid, package_id, price, "wallet", is_test=0)
@@ -2146,7 +2165,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("pay:card:"):
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or package_row["stock"] <= 0:
+        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         card  = setting_get("payment_card", "")
@@ -2175,7 +2194,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("pay:crypto:"):
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or package_row["stock"] <= 0:
+        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price = get_effective_price(uid, package_row)
@@ -2193,7 +2212,7 @@ def _dispatch_callback(call, uid, data):
             package_id  = sd.get("package_id")
             amount      = sd.get("amount")
             package_row = get_package(package_id)
-            if not package_row or package_row["stock"] <= 0:
+            if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
                 bot.answer_callback_query(call.id, "موجودی تمام شده است.", show_alert=True)
                 return
             payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
@@ -2266,7 +2285,16 @@ def _dispatch_callback(call, uid, data):
                 if not config_id:
                     config_id = reserve_first_config(package_id, payment_id)
                 if not config_id:
-                    bot.answer_callback_query(call.id, "پرداخت تأیید شد اما کانفیگ موجود نیست. با پشتیبانی تماس بگیرید.", show_alert=True)
+                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "swapwallet")
+                    complete_payment(payment_id)
+                    bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+                    send_or_edit(call,
+                        "✅ پرداخت شما تأیید شد.\n\n"
+                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
+                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
+                        "🙏 از صبر شما متشکریم.", back_button("main"))
+                    notify_pending_order_to_admins(pending_id, uid, package_row, payment["amount"], "swapwallet")
+                    state_clear(uid)
                     return
                 purchase_id = assign_config_to_user(config_id, uid, package_id, payment["amount"], "swapwallet", is_test=0)
                 complete_payment(payment_id)
@@ -2282,7 +2310,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("pay:swapwallet:"):
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or package_row["stock"] <= 0:
+        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price    = get_effective_price(uid, package_row)
@@ -2352,7 +2380,16 @@ def _dispatch_callback(call, uid, data):
                 if not config_id:
                     config_id = reserve_first_config(package_id, payment_id)
                 if not config_id:
-                    bot.answer_callback_query(call.id, "پرداخت تأیید شد اما کانفیگ موجود نیست. با پشتیبانی تماس بگیرید.", show_alert=True)
+                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "tetrapay")
+                    complete_payment(payment_id)
+                    bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+                    send_or_edit(call,
+                        "✅ پرداخت شما تأیید شد.\n\n"
+                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
+                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
+                        "🙏 از صبر شما متشکریم.", back_button("main"))
+                    notify_pending_order_to_admins(pending_id, uid, package_row, payment["amount"], "tetrapay")
+                    state_clear(uid)
                     return
                 purchase_id = assign_config_to_user(config_id, uid, package_id, payment["amount"], "tetrapay", is_test=0)
                 complete_payment(payment_id)
@@ -2368,7 +2405,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("pay:tetrapay:"):
         package_id = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or package_row["stock"] <= 0:
+        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price = get_effective_price(uid, package_row)
