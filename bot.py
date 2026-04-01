@@ -436,6 +436,21 @@ def verify_tetrapay_order(authority):
     except Exception as e:
         return False, {"error": str(e)}
 
+def _swapwallet_crypto_line(amount_toman, api_result):
+    """Return (crypto_amount_str, token, network) for display.
+    Prefers the usdValue returned by the API; falls back to live price lookup."""
+    usd_val    = api_result.get("amount", {}).get("usdValue", {})
+    usd_amount = (usd_val or {}).get("number", "").strip()
+    usd_unit   = (usd_val or {}).get("unit", "USDT").strip() or "USDT"
+    network    = "ترون (TRC-20)"
+    if not usd_amount:
+        prices = fetch_crypto_prices()
+        irt_per_usdt = prices.get("USDT", 0)
+        if irt_per_usdt > 0:
+            calc = round(amount_toman / irt_per_usdt, 4)
+            usd_amount = str(calc)
+    return usd_amount, usd_unit, network
+
 def create_swapwallet_invoice(amount_toman, order_id, description="پرداخت"):
     api_key  = setting_get("swapwallet_api_key", "")
     username = setting_get("swapwallet_username", "").strip()
@@ -1935,25 +1950,24 @@ def _dispatch_callback(call, uid, data):
         invoice_id     = result.get("id", "")
         wallet_address = result.get("walletAddress", "")
         links          = result.get("links", [])
-        usd_val        = result.get("amount", {}).get("usdValue", {})
-        usd_amount     = usd_val.get("number", "")
-        usd_unit       = usd_val.get("unit", "USDT")
+        usd_amount, usd_unit, network = _swapwallet_crypto_line(price, result)
         payment_id = create_payment("renewal", uid, package_id, price, "swapwallet", status="pending",
                                      config_id=item["config_id"])
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_renewal_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id,
                   purchase_id=purchase_id)
+        crypto_line = f"<b>{esc(usd_amount)} {esc(usd_unit)}</b> ({network})" if usd_amount else f"<b>{esc(usd_unit)}</b> (مراجعه به درگاه)"
         text = (
             "💎 <b>پرداخت با سواپ ولت (تمدید)</b>\n\n"
             "⚠️ <b>راهنما:</b>\n"
             "۱. ربات <a href='https://t.me/SwapWalletBot'>@SwapWalletBot</a> را استارت کنید\n"
             "۲. احراز هویت انجام دهید\n"
-            "۳. کیف پول خود را به مقدار لازم شارژ کنید\n"
-            "۴. روی دکمه «پرداخت» بزنید تا مبلغ از کیف پولتان کسر شود\n\n"
+            "۳. کیف پول خود را شارژ کنید\n"
+            "۴. روی دکمه پرداخت بزنید تا مبلغ از کیف پولتان کسر شود\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-            f"💵 معادل: <b>{esc(usd_amount)} {esc(usd_unit)}</b>\n\n"
-            f"📬 آدرس کیف پول:\n<code>{esc(wallet_address)}</code>\n\n"
+            f"💳 شما باید {crypto_line} به آدرس زیر واریز کنید:\n"
+            f"<code>{esc(wallet_address)}</code>\n\n"
             "پس از پرداخت، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
@@ -2387,23 +2401,22 @@ def _dispatch_callback(call, uid, data):
         invoice_id     = result.get("id", "")
         wallet_address = result.get("walletAddress", "")
         links          = result.get("links", [])
-        usd_val        = result.get("amount", {}).get("usdValue", {})
-        usd_amount     = usd_val.get("number", "")
-        usd_unit       = usd_val.get("unit", "USDT")
+        usd_amount, usd_unit, network = _swapwallet_crypto_line(price, result)
         payment_id = create_payment("config_purchase", uid, package_id, price, "swapwallet", status="pending")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id)
+        crypto_line = f"<b>{esc(usd_amount)} {esc(usd_unit)}</b> ({network})" if usd_amount else f"<b>{esc(usd_unit)}</b> (مراجعه به درگاه)"
         text = (
             "💎 <b>پرداخت با سواپ ولت</b>\n\n"
             "⚠️ <b>راهنما:</b>\n"
             "۱. ربات <a href='https://t.me/SwapWalletBot'>@SwapWalletBot</a> را استارت کنید\n"
             "۲. احراز هویت انجام دهید\n"
-            "۳. کیف پول خود را به مقدار لازم شارژ کنید\n"
-            "۴. روی دکمه «پرداخت» بزنید تا مبلغ از کیف پولتان کسر شود\n\n"
+            "۳. کیف پول خود را شارژ کنید\n"
+            "۴. روی دکمه پرداخت بزنید تا مبلغ از کیف پولتان کسر شود\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-            f"💵 معادل: <b>{esc(usd_amount)} {esc(usd_unit)}</b>\n\n"
-            f"📬 آدرس کیف پول:\n<code>{esc(wallet_address)}</code>\n\n"
+            f"💳 شما باید {crypto_line} به آدرس زیر واریز کنید:\n"
+            f"<code>{esc(wallet_address)}</code>\n\n"
             "پس از پرداخت، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
@@ -2679,23 +2692,22 @@ def _dispatch_callback(call, uid, data):
         invoice_id     = result.get("id", "")
         wallet_address = result.get("walletAddress", "")
         links          = result.get("links", [])
-        usd_val        = result.get("amount", {}).get("usdValue", {})
-        usd_amount     = usd_val.get("number", "")
-        usd_unit       = usd_val.get("unit", "USDT")
+        usd_amount, usd_unit, network = _swapwallet_crypto_line(amount, result)
         payment_id = create_payment("wallet_charge", uid, None, amount, "swapwallet", status="pending")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id)
+        crypto_line = f"<b>{esc(usd_amount)} {esc(usd_unit)}</b> ({network})" if usd_amount else f"<b>{esc(usd_unit)}</b> (مراجعه به درگاه)"
         text = (
             "💎 <b>شارژ کیف پول - پرداخت با سواپ ولت</b>\n\n"
             "⚠️ <b>راهنما:</b>\n"
             "۱. ربات <a href='https://t.me/SwapWalletBot'>@SwapWalletBot</a> را استارت کنید\n"
             "۲. احراز هویت انجام دهید\n"
             "۳. کیف پول خود را شارژ کنید\n"
-            "۴. روی دکمه «پرداخت» بزنید تا مبلغ از کیف پولتان کسر شود\n\n"
+            "۴. روی دکمه پرداخت بزنید تا مبلغ از کیف پولتان کسر شود\n\n"
             f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
-            f"💵 معادل: <b>{esc(usd_amount)} {esc(usd_unit)}</b>\n\n"
-            f"📬 آدرس کیف پول:\n<code>{esc(wallet_address)}</code>\n\n"
+            f"💳 شما باید {crypto_line} به آدرس زیر واریز کنید:\n"
+            f"<code>{esc(wallet_address)}</code>\n\n"
             "پس از پرداخت، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
