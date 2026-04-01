@@ -1247,6 +1247,44 @@ def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, met
         except Exception:
             pass
 
+def _complete_pending_order(pending_id, cfg_name, cfg_text, inquiry_link):
+    """Create a new config, assign it to the pending-order user, send delivery message."""
+    p_row = get_pending_order(pending_id)
+    if not p_row or p_row["status"] == "fulfilled":
+        return False
+    package_id = p_row["package_id"]
+    user_id    = p_row["user_id"]
+    pkg        = get_package(package_id)
+    # Register a new config directly into the configs table
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO configs(service_name, config_text, inquiry_link, package_id, type_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            (cfg_name, cfg_text, inquiry_link, package_id, pkg["type_id"] if pkg else None)
+        )
+        config_id = cur.lastrowid
+    # Assign to user
+    purchase_id = assign_config_to_user(
+        config_id, user_id, package_id,
+        p_row["amount"], p_row["payment_method"], is_test=0
+    )
+    # Mark pending order as fulfilled
+    fulfill_pending_order(pending_id)
+    # Deliver to user
+    user = get_user(user_id)
+    try:
+        bot.send_message(
+            user_id,
+            "🎉 <b>کانفیگ شما آماده شد!</b>\n\n"
+            "سفارش شما توسط پشتیبانی تکمیل شد. جزئیات سرویس در ادامه ارسال می‌شود."
+        )
+    except Exception:
+        pass
+    deliver_purchase_message(user_id, purchase_id)
+    if pkg:
+        admin_purchase_notify(p_row["payment_method"], user, pkg)
+    return True
+
 # ── Payment helpers ────────────────────────────────────────────────────────────
 def get_effective_price(user_id, package_row):
     """Return agency price if user is agent and has a custom price, else regular price."""
@@ -1389,8 +1427,24 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
             if not config_id:
                 config_id = reserve_first_config(package_id, payment_id)
             if not config_id:
-                bot.send_message(user_id, "❌ پرداخت تأیید شد اما موجودی کانفیگ تمام شده است. با پشتیبانی تماس بگیرید.")
-                return False
+                # No stock — create a pending order and notify admins
+                pending_id = create_pending_order(
+                    user_id, package_id, payment_id, payment["amount"], payment["payment_method"]
+                )
+                complete_payment(payment_id)
+                bot.send_message(
+                    user_id,
+                    "✅ پرداخت شما تأیید شد.\n\n"
+                    "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
+                    "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
+                    "🙏 از صبر شما متشکریم."
+                )
+                notify_pending_order_to_admins(
+                    pending_id, user_id, package_row if package_row else {"type_name": "-", "name": "-",
+                    "volume_gb": "-", "duration_days": "-", "price": payment["amount"]},
+                    payment["amount"], payment["payment_method"]
+                )
+                return True
             if payment["config_id"] != config_id:
                 with get_conn() as conn:
                     conn.execute("UPDATE payments SET config_id=? WHERE id=?", (config_id, payment_id))
@@ -4133,6 +4187,37 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "❌ متن رد را برای کاربر ارسال کنید:", back_button("admin:panel"))
         return
 
+    if data.startswith("adm:pending:addcfg:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        pending_id = int(data.split(":")[3])
+        p_row = get_pending_order(pending_id)
+        if not p_row:
+            bot.answer_callback_query(call.id, "سفارش یافت نشد.", show_alert=True)
+            return
+        if p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "این سفارش قبلاً تکمیل شده است.", show_alert=True)
+            return
+        state_set(uid, "admin_pending_cfg_name", pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        pkg = get_package(p_row["package_id"])
+        pkg_info = ""
+        if pkg:
+            pkg_info = (
+                f"\n\n📦 <b>اطلاعات پکیج:</b>\n"
+                f"🧩 نوع: {esc(pkg['type_name'])}\n"
+                f"✏️ نام: {esc(pkg['name'])}\n"
+                f"🔋 حجم: {pkg['volume_gb']} گیگ\n"
+                f"⏰ مدت: {pkg['duration_days']} روز\n"
+                f"💰 قیمت: {fmt_price(pkg['price'])} تومان"
+            )
+        send_or_edit(call,
+            f"📝 <b>ثبت کانفیگ برای سفارش #{pending_id}</b>{pkg_info}\n\n"
+            "لطفاً <b>نام سرویس</b> را ارسال کنید:",
+            back_button("admin:panel"))
+        return
+
     if data == "noop":
         bot.answer_callback_query(call.id)
         return
@@ -5066,6 +5151,44 @@ def universal_handler(message):
             finish_card_payment_approval(payment_id, note, approved=False)
             state_clear(uid)
             bot.send_message(uid, "✅ درخواست با موفقیت رد شد.", reply_markup=kb_admin_panel())
+            return
+
+        # ── Admin: Pending order config entry ─────────────────────────────────
+        if sn == "admin_pending_cfg_name" and is_admin(uid):
+            cfg_name = (message.text or "").strip()
+            if not cfg_name:
+                bot.send_message(uid, "⚠️ نام سرویس نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:")
+                return
+            state_set(uid, "admin_pending_cfg_text", pending_id=sd["pending_id"], cfg_name=cfg_name)
+            bot.send_message(uid, "✅ نام ثبت شد.\n\nحالا <b>متن کانفیگ</b> را ارسال کنید:")
+            return
+
+        if sn == "admin_pending_cfg_text" and is_admin(uid):
+            cfg_text = (message.text or "").strip()
+            if not cfg_text:
+                bot.send_message(uid, "⚠️ متن کانفیگ نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:")
+                return
+            state_set(uid, "admin_pending_cfg_link",
+                      pending_id=sd["pending_id"], cfg_name=sd["cfg_name"], cfg_text=cfg_text)
+            bot.send_message(uid,
+                "✅ کانفیگ ثبت شد.\n\n"
+                "اگر <b>لینک استعلام</b> دارد ارسال کنید، در غیر اینصورت <b>ندارد</b> بنویسید:")
+            return
+
+        if sn == "admin_pending_cfg_link" and is_admin(uid):
+            raw_link = (message.text or "").strip()
+            inquiry_link = None if raw_link.lower() in ("ندارد", "no", "-", "") else raw_link
+            pending_id = sd["pending_id"]
+            cfg_name   = sd["cfg_name"]
+            cfg_text   = sd["cfg_text"]
+            state_clear(uid)
+            # Deliver config to the user
+            ok = _complete_pending_order(pending_id, cfg_name, cfg_text, inquiry_link)
+            if ok:
+                bot.send_message(uid, "✅ کانفیگ برای کاربر ارسال شد.", reply_markup=kb_admin_panel())
+            else:
+                bot.send_message(uid, "⚠️ خطا در تکمیل سفارش. ممکن است قبلاً تکمیل شده باشد.",
+                                 reply_markup=kb_admin_panel())
             return
 
         # ── Agency request text ────────────────────────────────────────────────
