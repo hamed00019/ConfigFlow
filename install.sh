@@ -7,7 +7,7 @@ if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
     curl -fsSL "https://raw.githubusercontent.com/Emadhabibnia1385/ConfigFlow/main/install.sh" -o "$_TMP" \
         || { echo "Error: failed to download install.sh"; rm -f "$_TMP"; exit 1; }
     chmod +x "$_TMP"
-    exec bash "$_TMP" "$@"
+    exec bash "$_TMP" "$@" </dev/tty
 fi
 
 set -Eeuo pipefail
