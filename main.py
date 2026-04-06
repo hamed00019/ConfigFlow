@@ -10,8 +10,8 @@ from bot.db import init_db
 from bot.ui.helpers import set_bot_commands
 from bot.db import setting_get
 from bot.admin.backup import _backup_loop
-from bot.bot_instance import bot
 import bot.handlers  # noqa: F401 — registers all handlers
+from bot.bot_instance import bot  # must come after to avoid being shadowed by the package name
 
 
 def main():
