@@ -58,13 +58,13 @@ def show_payment_method_selection(target, uid, context_data):
     amount = context_data["amount"]
 
     kb = types.InlineKeyboardMarkup()
-    if is_gateway_available("card", uid) and is_card_info_complete():
+    if is_gateway_available("card", uid, amount) and is_card_info_complete():
         kb.add(types.InlineKeyboardButton("💳 کارت به کارت", callback_data="pm:card"))
-    if is_gateway_available("crypto", uid):
+    if is_gateway_available("crypto", uid, amount):
         kb.add(types.InlineKeyboardButton("💎 ارز دیجیتال", callback_data="pm:crypto"))
-    if is_gateway_available("tetrapay", uid):
+    if is_gateway_available("tetrapay", uid, amount):
         kb.add(types.InlineKeyboardButton("🏦 پرداخت آنلاین (TetraPay)", callback_data="pm:tetrapay"))
-    if is_gateway_available("swapwallet", uid):
+    if is_gateway_available("swapwallet", uid, amount):
         kb.add(types.InlineKeyboardButton("💎 پرداخت با سواپ ولت", callback_data="pm:swapwallet"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 

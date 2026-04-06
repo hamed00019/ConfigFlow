@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import os
 import traceback
 import sqlite3
+from datetime import datetime
 from telebot import types
-from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, CONFIGS_PER_PAGE
+from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, CONFIGS_PER_PAGE, DB_NAME
 from ..bot_instance import bot
 from ..helpers import (
     esc, fmt_price, now_str, display_name, display_username,
@@ -97,13 +99,13 @@ def universal_handler(message):
                 return
             state_set(uid, "wallet_charge_method", amount=amount)
             kb = types.InlineKeyboardMarkup()
-            if is_gateway_available("card", uid) and is_card_info_complete():
+            if is_gateway_available("card", uid, amount) and is_card_info_complete():
                 kb.add(types.InlineKeyboardButton("💳 کارت به کارت",  callback_data="wallet:charge:card"))
-            if is_gateway_available("crypto", uid):
+            if is_gateway_available("crypto", uid, amount):
                 kb.add(types.InlineKeyboardButton("💎 ارز دیجیتال",       callback_data="wallet:charge:crypto"))
-            if is_gateway_available("tetrapay", uid):
+            if is_gateway_available("tetrapay", uid, amount):
                 kb.add(types.InlineKeyboardButton("🏦 پرداخت آنلاین (TetraPay)", callback_data="wallet:charge:tetrapay"))
-            if is_gateway_available("swapwallet", uid):
+            if is_gateway_available("swapwallet", uid, amount):
                 kb.add(types.InlineKeyboardButton("💎 پرداخت با سواپ ولت", callback_data="wallet:charge:swapwallet"))
             kb.add(types.InlineKeyboardButton("🔙 بازگشت",            callback_data="nav:main"))
             bot.send_message(
@@ -565,6 +567,36 @@ def universal_handler(message):
             setting_set("swapwallet_username", "" if val == "-" else val)
             state_clear(uid)
             bot.send_message(uid, "✅ نام کاربری فروشگاه سواپ ولت ذخیره شد.", reply_markup=back_button("adm:set:gw:swapwallet"))
+            return
+
+        if sn == "admin_gw_range_min" and is_admin(uid):
+            gw = sd.get("gw", "")
+            val = (message.text or "").strip()
+            if val in ("0", "-", "بدون حداقل"):
+                setting_set(f"gw_{gw}_range_min", "")
+            elif val.isdigit():
+                setting_set(f"gw_{gw}_range_min", val)
+            else:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید یا <code>0</code> برای بدون حداقل:", reply_markup=back_button(f"adm:gw:{gw}:range"))
+                return
+            state_set(uid, "admin_gw_range_max", gw=gw)
+            bot.send_message(uid,
+                "📊 <b>حداکثر مبلغ</b> (تومان) را وارد کنید.\n\n"
+                "برای <b>بدون حداکثر</b>، عدد <code>0</code> یا <code>-</code> ارسال کنید:")
+            return
+
+        if sn == "admin_gw_range_max" and is_admin(uid):
+            gw = sd.get("gw", "")
+            val = (message.text or "").strip()
+            if val in ("0", "-", "بدون حداکثر"):
+                setting_set(f"gw_{gw}_range_max", "")
+            elif val.isdigit():
+                setting_set(f"gw_{gw}_range_max", val)
+            else:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید یا <code>0</code> برای بدون حداکثر:", reply_markup=back_button(f"adm:gw:{gw}:range"))
+                return
+            state_clear(uid)
+            bot.send_message(uid, "✅ بازه پرداختی ذخیره شد.", reply_markup=back_button(f"adm:gw:{gw}:range"))
             return
 
         if sn == "admin_set_channel" and is_admin(uid):

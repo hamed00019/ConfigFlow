@@ -410,13 +410,13 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"rpay:wallet:{purchase_id}:{package_id}"))
-        if is_gateway_available("card", uid) and is_card_info_complete():
+        if is_gateway_available("card", uid, price) and is_card_info_complete():
             kb.add(types.InlineKeyboardButton("💳 کارت به کارت", callback_data=f"rpay:card:{purchase_id}:{package_id}"))
-        if is_gateway_available("crypto", uid):
+        if is_gateway_available("crypto", uid, price):
             kb.add(types.InlineKeyboardButton("💎 ارز دیجیتال", callback_data=f"rpay:crypto:{purchase_id}:{package_id}"))
-        if is_gateway_available("tetrapay", uid):
+        if is_gateway_available("tetrapay", uid, price):
             kb.add(types.InlineKeyboardButton("🏦 پرداخت آنلاین (TetraPay)", callback_data=f"rpay:tetrapay:{purchase_id}:{package_id}"))
-        if is_gateway_available("swapwallet", uid):
+        if is_gateway_available("swapwallet", uid, price):
             kb.add(types.InlineKeyboardButton("💎 پرداخت با سواپ ولت", callback_data=f"rpay:swapwallet:{purchase_id}:{package_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"renew:{purchase_id}"))
         bot.answer_callback_query(call.id)
@@ -806,13 +806,13 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"pay:wallet:{package_id}"))
-        if is_gateway_available("card", uid) and is_card_info_complete():
+        if is_gateway_available("card", uid, price) and is_card_info_complete():
             kb.add(types.InlineKeyboardButton("💳 کارت به کارت", callback_data=f"pay:card:{package_id}"))
-        if is_gateway_available("crypto", uid):
+        if is_gateway_available("crypto", uid, price):
             kb.add(types.InlineKeyboardButton("💎 ارز دیجیتال", callback_data=f"pay:crypto:{package_id}"))
-        if is_gateway_available("tetrapay", uid):
+        if is_gateway_available("tetrapay", uid, price):
             kb.add(types.InlineKeyboardButton("🏦 پرداخت آنلاین (TetraPay)", callback_data=f"pay:tetrapay:{package_id}"))
-        if is_gateway_available("swapwallet", uid):
+        if is_gateway_available("swapwallet", uid, price):
             kb.add(types.InlineKeyboardButton("💎 پرداخت با سواپ ولت", callback_data=f"pay:swapwallet:{package_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{package_row['type_id']}"))
         bot.answer_callback_query(call.id)
@@ -2716,13 +2716,16 @@ def _dispatch_callback(call, uid, data):
         card = setting_get("payment_card", "")
         bank = setting_get("payment_bank", "")
         owner = setting_get("payment_owner", "")
+        range_enabled = setting_get("gw_card_range_enabled", "0")
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label = "🟢 فعال" if range_enabled == "1" else "🔴 غیرفعال"
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:card:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}", callback_data="adm:gw:card:vis"),
         )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:card:range"))
         kb.add(types.InlineKeyboardButton("💳 شماره کارت", callback_data="adm:set:card"))
         kb.add(types.InlineKeyboardButton("🏦 نام بانک", callback_data="adm:set:bank"))
         kb.add(types.InlineKeyboardButton("👤 نام صاحب کارت", callback_data="adm:set:owner"))
@@ -2756,13 +2759,16 @@ def _dispatch_callback(call, uid, data):
     if data == "adm:set:gw:crypto":
         enabled = setting_get("gw_crypto_enabled", "0")
         vis = setting_get("gw_crypto_visibility", "public")
+        range_enabled = setting_get("gw_crypto_range_enabled", "0")
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label = "🟢 فعال" if range_enabled == "1" else "🔴 غیرفعال"
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:crypto:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}", callback_data="adm:gw:crypto:vis"),
         )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:crypto:range"))
         for coin_key, coin_label in CRYPTO_COINS:
             addr = setting_get(f"crypto_{coin_key}", "")
             status_icon = "✅" if addr else "❌"
@@ -2811,6 +2817,9 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(f"تلگرام: {bot_label}", callback_data="adm:gw:tetrapay:mode_bot"),
             types.InlineKeyboardButton(f"مرورگر: {web_label}", callback_data="adm:gw:tetrapay:mode_web"),
         )
+        range_enabled_tp = setting_get("gw_tetrapay_range_enabled", "0")
+        range_label_tp = "🟢 فعال" if range_enabled_tp == "1" else "🔴 غیرفعال"
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label_tp}", callback_data="adm:gw:tetrapay:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tetrapay_key"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سایت TetraPay", url="https://tetra98.com"))
@@ -2877,6 +2886,9 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:swapwallet:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}",    callback_data="adm:gw:swapwallet:vis"),
         )
+        range_enabled_sw = setting_get("gw_swapwallet_range_enabled", "0")
+        range_label_sw = "🟢 فعال" if range_enabled_sw == "1" else "🔴 غیرفعال"
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label_sw}", callback_data="adm:gw:swapwallet:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API",             callback_data="adm:set:swapwallet_key"))
         kb.add(types.InlineKeyboardButton("👤 نام کاربری فروشگاه",          callback_data="adm:set:swapwallet_username"))
         if not api_key:
@@ -2928,6 +2940,50 @@ def _dispatch_callback(call, uid, data):
             f"👤 نام کاربری فروشگاه سواپ ولت را ارسال کنید.\n"
             f"مقدار فعلی: <code>{esc(current or 'ثبت نشده')}</code>",
             back_button("adm:set:gw:swapwallet"))
+        return
+
+    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet"}
+
+    if data.startswith("adm:gw:") and data.endswith(":range"):
+        gw_name = data.split(":")[2]
+        gw_label = _GW_RANGE_LABELS.get(gw_name, gw_name)
+        range_enabled = setting_get(f"gw_{gw_name}_range_enabled", "0")
+        range_min = setting_get(f"gw_{gw_name}_range_min", "")
+        range_max = setting_get(f"gw_{gw_name}_range_max", "")
+        enabled_label = "🟢 فعال" if range_enabled == "1" else "🔴 غیرفعال"
+        min_label = fmt_price(int(range_min)) + " تومان" if range_min else "بدون حداقل"
+        max_label = fmt_price(int(range_max)) + " تومان" if range_max else "بدون حداکثر"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(f"وضعیت بازه: {enabled_label}", callback_data=f"adm:gw:{gw_name}:range:toggle"))
+        kb.add(types.InlineKeyboardButton("✏️ تنظیم بازه", callback_data=f"adm:gw:{gw_name}:range:set"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:set:gw:{gw_name}"))
+        text = (
+            f"📊 <b>بازه پرداختی — {gw_label}</b>\n\n"
+            f"وضعیت: {enabled_label}\n"
+            f"حداقل مبلغ: {min_label}\n"
+            f"حداکثر مبلغ: {max_label}\n\n"
+            "⚠️ اگر بازه فعال باشد، این درگاه فقط برای مبالغ داخل بازه نمایش داده می‌شود."
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:gw:") and data.endswith(":range:toggle"):
+        gw_name = data.split(":")[2]
+        cur = setting_get(f"gw_{gw_name}_range_enabled", "0")
+        setting_set(f"gw_{gw_name}_range_enabled", "0" if cur == "1" else "1")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, f"adm:gw:{gw_name}:range")
+        return
+
+    if data.startswith("adm:gw:") and data.endswith(":range:set"):
+        gw_name = data.split(":")[2]
+        state_set(uid, "admin_gw_range_min", gw=gw_name)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "📊 <b>حداقل مبلغ</b> (تومان) را وارد کنید.\n\n"
+            "برای <b>بدون حداقل</b>، عدد <code>0</code> یا <code>-</code> ارسال کنید:",
+            back_button(f"adm:gw:{gw_name}:range"))
         return
 
     if data == "adm:set:payment":

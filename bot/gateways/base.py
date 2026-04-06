@@ -5,7 +5,7 @@ Gateway availability checks shared across all payment gateways.
 from ..db import setting_get, get_user
 
 
-def is_gateway_available(gw_name, user_id):
+def is_gateway_available(gw_name, user_id, amount=None):
     """Return True if the named gateway is enabled and visible to this user."""
     enabled = setting_get(f"gw_{gw_name}_enabled", "0")
     if enabled != "1":
@@ -13,7 +13,17 @@ def is_gateway_available(gw_name, user_id):
     visibility = setting_get(f"gw_{gw_name}_visibility", "public")
     if visibility == "secure":
         user = get_user(user_id)
-        return user and user["status"] == "safe"
+        if not (user and user["status"] == "safe"):
+            return False
+    if amount is not None:
+        range_enabled = setting_get(f"gw_{gw_name}_range_enabled", "0")
+        if range_enabled == "1":
+            range_min = setting_get(f"gw_{gw_name}_range_min", "")
+            range_max = setting_get(f"gw_{gw_name}_range_max", "")
+            if range_min and int(range_min) > amount:
+                return False
+            if range_max and int(range_max) < amount:
+                return False
     return True
 
 
