@@ -124,7 +124,7 @@ def universal_handler(message):
                 file_id = message.document.file_id
             update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
-            bot.send_message(uid, "✅ رسید شما دریافت شد و برای بررسی ادمین ارسال گردید.",
+            bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
             send_payment_to_admins(payment_id)
             return
@@ -140,7 +140,7 @@ def universal_handler(message):
                 file_id = message.document.file_id
             update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
-            bot.send_message(uid, "✅ رسید شما دریافت شد و برای بررسی ادمین ارسال گردید.",
+            bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
             send_payment_to_admins(payment_id)
             return
@@ -156,7 +156,7 @@ def universal_handler(message):
                 file_id = message.document.file_id
             update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
-            bot.send_message(uid, "✅ رسید شما دریافت شد و برای بررسی ادمین ارسال گردید.",
+            bot.send_message(uid, "✅ رسید تمدید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
             send_payment_to_admins(payment_id)
             return
@@ -786,7 +786,8 @@ def universal_handler(message):
         # ── Admin: Payment approval ────────────────────────────────────────────
         if sn == "admin_payment_approve_note" and is_admin(uid):
             payment_id = sd["payment_id"]
-            note       = (message.text or "").strip() or "واریزی شما تأیید شد."
+            raw_note   = (message.text or "").strip()
+            note = "واریزی شما تأیید شد." if (not raw_note or raw_note == "➖") else raw_note
             finish_card_payment_approval(payment_id, note, approved=True)
             state_clear(uid)
             bot.send_message(uid, "✅ درخواست با موفقیت تأیید شد.", reply_markup=kb_admin_panel())
@@ -794,7 +795,8 @@ def universal_handler(message):
 
         if sn == "admin_payment_reject_note" and is_admin(uid):
             payment_id = sd["payment_id"]
-            note       = (message.text or "").strip() or "رسید شما رد شد."
+            raw_note   = (message.text or "").strip()
+            note = "رسید شما رد شد." if (not raw_note or raw_note == "➖") else raw_note
             finish_card_payment_approval(payment_id, note, approved=False)
             state_clear(uid)
             bot.send_message(uid, "✅ درخواست با موفقیت رد شد.", reply_markup=kb_admin_panel())

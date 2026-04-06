@@ -13,8 +13,8 @@ from ..db import (
     ensure_user, get_user, get_users, count_all_users, set_user_status,
     set_user_agent, update_balance, get_user_detail, get_user_purchases,
     get_purchase, get_available_configs_for_package,
-    get_all_types, get_type, add_type, update_type, update_type_description, delete_type,
-    get_packages, get_package, add_package, update_package_field, delete_package,
+    get_all_types, get_active_types, get_type, add_type, update_type, update_type_description, update_type_active, delete_type,
+    get_packages, get_package, add_package, update_package_field, toggle_package_active, delete_package,
     get_registered_packages_stock, get_configs_paginated, count_configs,
     expire_config, add_config,
     assign_config_to_user, reserve_first_config, release_reserved_config,
@@ -600,6 +600,39 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
+    if data.startswith("rpay:tetrapay:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        authority = payment["receipt_text"]
+        success, result = verify_tetrapay_order(authority)
+        if success:
+            complete_payment(payment_id)
+            package_row = get_package(payment["package_id"])
+            config_id = payment["config_id"]
+            with get_conn() as conn:
+                row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (config_id,)).fetchone()
+            purchase_id = row["purchase_id"] if row else 0
+            item = get_purchase(purchase_id) if purchase_id else None
+            bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+            send_or_edit(call,
+                "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                "🙏 از صبر و شکیبایی شما متشکریم.",
+                back_button("main"))
+            if item:
+                admin_renewal_notify(uid, item, package_row, payment["amount"], "TetraPay")
+            state_clear(uid)
+        else:
+            bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+        return
+
     if data.startswith("rpay:tetrapay:"):
         parts = data.split(":")
         purchase_id = int(parts[2])
@@ -645,36 +678,8 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:tetrapay:verify:"):
-        payment_id = int(data.split(":")[3])
-        payment = get_payment(payment_id)
-        if not payment or payment["user_id"] != uid:
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        if payment["status"] != "pending":
-            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
-            return
-        authority = payment["receipt_text"]
-        success, result = verify_tetrapay_order(authority)
-        if success:
-            complete_payment(payment_id)
-            package_row = get_package(payment["package_id"])
-            config_id = payment["config_id"]
-            with get_conn() as conn:
-                row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (config_id,)).fetchone()
-            purchase_id = row["purchase_id"] if row else 0
-            item = get_purchase(purchase_id) if purchase_id else None
-            bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-            send_or_edit(call,
-                "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
-                "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
-                "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
-                "🙏 از صبر و شکیبایی شما متشکریم.",
-                back_button("main"))
-            if item:
-                admin_renewal_notify(uid, item, package_row, payment["amount"], "TetraPay")
-            state_clear(uid)
-        else:
-            bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+        # NOTE: this block is now unreachable (handled above) — kept as safety guard
+        bot.answer_callback_query(call.id)
         return
 
     # ── Admin: Confirm renewal ────────────────────────────────────────────────
@@ -736,7 +741,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
         stock_only = setting_get("preorder_mode", "0") == "1"
-        items = get_all_types()
+        items = get_active_types()
         kb = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
@@ -1156,7 +1161,7 @@ def _dispatch_callback(call, uid, data):
             if user_has_any_test(uid):
                 bot.answer_callback_query(call.id, "شما قبلاً تست رایگان خود را دریافت کرده‌اید.", show_alert=True)
                 return
-        items = get_all_types()
+        items = get_active_types()
         kb    = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
@@ -1389,10 +1394,14 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📝 ویرایش توضیحات", callback_data=f"admin:type:editdesc:{type_id}"))
         if row["description"]:
             kb.add(types.InlineKeyboardButton("🗑 حذف توضیحات", callback_data=f"admin:type:deldesc:{type_id}"))
+        is_active = row["is_active"] if "is_active" in row.keys() else 1
+        status_label = "✅ فعال — کلیک برای غیرفعال" if is_active else "❌ غیرفعال — کلیک برای فعال"
+        kb.add(types.InlineKeyboardButton(status_label, callback_data=f"admin:type:toggleactive:{type_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:types"))
         desc_preview = f"\n📝 توضیحات: {esc(row['description'][:80])}..." if row["description"] and len(row["description"]) > 80 else (f"\n📝 توضیحات: {esc(row['description'])}" if row["description"] else "\n📝 توضیحات: ندارد")
+        status_line  = "\n🔘 وضعیت: <b>فعال</b>" if is_active else "\n🔘 وضعیت: <b>غیرفعال</b>"
         bot.answer_callback_query(call.id)
-        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}", kb)
+        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}{status_line}", kb)
         return
 
     if data.startswith("admin:type:editname:"):
@@ -1448,6 +1457,33 @@ def _dispatch_callback(call, uid, data):
         _show_admin_types(call)
         return
 
+    if data.startswith("admin:type:toggleactive:"):
+        type_id = int(data.split(":")[3])
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        cur = row["is_active"] if "is_active" in row.keys() else 1
+        update_type_active(type_id, 0 if cur else 1)
+        new_status = "غیرفعال" if cur else "فعال"
+        bot.answer_callback_query(call.id, f"✅ نوع {new_status} شد.")
+        # re-open the edit screen with updated state
+        call.data = f"admin:type:edit:{type_id}"
+        data      = call.data
+
+    if data.startswith("admin:pkg:toggleactive:"):
+        package_id = int(data.split(":")[3])
+        pkg = get_package(package_id)
+        if not pkg:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        toggle_package_active(package_id)
+        cur = pkg["active"] if "active" in pkg.keys() else 1
+        new_status = "غیرفعال" if cur else "فعال"
+        bot.answer_callback_query(call.id, f"✅ پکیج {new_status} شد.")
+        call.data = f"admin:pkg:edit:{package_id}"
+        data      = call.data
+
     if data.startswith("admin:type:del:"):
         type_id = int(data.split(":")[3])
         packs = get_packages(type_id=type_id, include_inactive=True)
@@ -1479,17 +1515,22 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
         kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
         kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
-        kb.add(types.InlineKeyboardButton("� جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
+        kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
+        pkg_active = package_row['active'] if 'active' in package_row.keys() else 1
+        pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
+        kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:types"))
         bot.answer_callback_query(call.id)
         cur_pos = package_row['position'] if 'position' in package_row.keys() else 0
+        pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
         text = (
             f"📦 <b>ویرایش پکیج</b>\n\n"
             f"نام: {esc(package_row['name'])}\n"
             f"قیمت: {fmt_price(package_row['price'])} تومان\n"
             f"حجم: {package_row['volume_gb']} GB\n"
             f"مدت: {package_row['duration_days']} روز\n"
-            f"جایگاه: {cur_pos}"
+            f"جایگاه: {cur_pos}\n"
+            f"وضعیت: {pkg_status_line}"
         )
         send_or_edit(call, text, kb)
         return
@@ -2146,6 +2187,18 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
+    if data.startswith("adm:usr:fl:"):
+        if not (admin_has_perm(uid, "view_users") or admin_has_perm(uid, "full_users") or
+                any(admin_has_perm(uid, p) for p in PERM_USER_FULL)):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts       = data.split(":")
+        filter_mode = parts[3]
+        page        = int(parts[4]) if len(parts) > 4 else 0
+        _show_admin_users_list(call, page=page, filter_mode=filter_mode)
+        bot.answer_callback_query(call.id)
+        return
+
     # ── Admin: User search ────────────────────────────────────────────────────
     if data == "adm:usr:search":
         state_set(uid, "admin_user_search")
@@ -2236,7 +2289,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "ادمین یافت نشد.", show_alert=True)
             return
         perms = json.loads(row["permissions"] or "{}")
-        state_set(uid, "admin_mgr_select_perms", target_user_id=target_id, perms=json.dumps(perms))
+        state_set(uid, "admin_mgr_select_perms", target_user_id=target_id, perms=json.dumps(perms), edit_mode=True)
         bot.answer_callback_query(call.id)
         _show_perm_selection(call, uid, target_id, perms, edit_mode=True)
         return
@@ -2287,10 +2340,10 @@ def _dispatch_callback(call, uid, data):
             if all(perms.get(k) for k, _ in ADMIN_PERMS if k != "full"):
                 perms["full"] = True
 
-        state_set(uid, "admin_mgr_select_perms",
-                  target_user_id=target_id, perms=json.dumps(perms))
-        bot.answer_callback_query(call.id)
         edit_mode = sd2.get("edit_mode", False)
+        state_set(uid, "admin_mgr_select_perms",
+                  target_user_id=target_id, perms=json.dumps(perms), edit_mode=edit_mode)
+        bot.answer_callback_query(call.id)
         _show_perm_selection(call, uid, target_id, perms, edit_mode=edit_mode)
         return
 
@@ -3116,9 +3169,56 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         payment_id = int(data.split(":")[3])
+        payment    = get_payment(payment_id)
+        if not payment:
+            bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True)
+            return
+        if payment["status"] not in ("pending",):
+            bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
+            return
+        user_row    = get_user(payment["user_id"])
+        package_row = get_package(payment["package_id"]) if payment["package_id"] else None
+        kind_label  = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+        pkg_text    = ""
+        if package_row:
+            pkg_text = (
+                f"\n🧩 نوع: {esc(package_row['type_name'])}"
+                f"\n📦 پکیج: {esc(package_row['name'])}"
+                f"\n🔋 حجم: {package_row['volume_gb']} گیگ | ⏰ {package_row['duration_days']} روز"
+            )
+        text = (
+            f"✅ <b>تأیید تراکنش</b>\n\n"
+            f"🧾 نوع: {kind_label}\n"
+            f"👤 کاربر: {esc(user_row['full_name'] if user_row else '-')}\n"
+            f"🆔 آیدی: <code>{payment['user_id']}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
+            f"{pkg_text}\n\n"
+            f"📝 پیام برای کاربر را تایپ کنید، یا دکمه‌ی زیر را بزنید:"
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✅ تأیید بدون توضیحات", callback_data=f"adm:pay:apc:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_approve_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "✅ متن تأیید را برای کاربر ارسال کنید:", back_button("admin:panel"))
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:pay:apc:"):
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        payment_id = int(data.split(":")[3])
+        payment    = get_payment(payment_id)
+        if not payment:
+            bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True)
+            return
+        if payment["status"] not in ("pending",):
+            bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
+            return
+        state_clear(uid)
+        finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
+        bot.answer_callback_query(call.id, "✅ تأیید شد.")
+        send_or_edit(call, "✅ تراکنش با موفقیت تأیید شد.", kb_admin_panel(uid))
         return
 
     if data.startswith("adm:pay:rj:"):
@@ -3126,9 +3226,56 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         payment_id = int(data.split(":")[3])
+        payment    = get_payment(payment_id)
+        if not payment:
+            bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True)
+            return
+        if payment["status"] not in ("pending",):
+            bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
+            return
+        user_row   = get_user(payment["user_id"])
+        package_row = get_package(payment["package_id"]) if payment["package_id"] else None
+        kind_label = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+        pkg_text   = ""
+        if package_row:
+            pkg_text = (
+                f"\n🧩 نوع: {esc(package_row['type_name'])}"
+                f"\n📦 پکیج: {esc(package_row['name'])}"
+                f"\n🔋 حجم: {package_row['volume_gb']} گیگ | ⏰ {package_row['duration_days']} روز"
+            )
+        text = (
+            f"❌ <b>رد تراکنش</b>\n\n"
+            f"🧾 نوع: {kind_label}\n"
+            f"👤 کاربر: {esc(user_row['full_name'] if user_row else '-')}\n"
+            f"🆔 آیدی: <code>{payment['user_id']}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
+            f"{pkg_text}\n\n"
+            f"📝 دلیل رد را تایپ کنید، یا دکمه‌ی زیر را بزنید:"
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("❌ رد بدون توضیحات", callback_data=f"adm:pay:rjc:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_reject_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "❌ متن رد را برای کاربر ارسال کنید:", back_button("admin:panel"))
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:pay:rjc:"):
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        payment_id = int(data.split(":")[3])
+        payment    = get_payment(payment_id)
+        if not payment:
+            bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True)
+            return
+        if payment["status"] not in ("pending",):
+            bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
+            return
+        state_clear(uid)
+        finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
+        bot.answer_callback_query(call.id, "❌ رد شد.")
+        send_or_edit(call, "❌ تراکنش رد شد.", kb_admin_panel(uid))
         return
 
     if data.startswith("adm:pending:addcfg:"):

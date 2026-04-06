@@ -10,6 +10,7 @@ from ..db import (
     get_all_types, get_packages, get_registered_packages_stock,
     get_all_admin_users, get_user, get_user_detail,
     get_panel, get_all_panels, get_panel_packages,
+    count_users_stats,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
 from ..bot_instance import bot
@@ -22,7 +23,9 @@ def _show_admin_types(call):
     kb.add(types.InlineKeyboardButton("➕ افزودن نوع جدید", callback_data="admin:type:add"))
     all_types = get_all_types()
     for item in all_types:
-        kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data="noop"))
+        is_type_active = item["is_active"] if "is_active" in item.keys() else 1
+        type_status_icon = "✅" if is_type_active else "❌"
+        kb.add(types.InlineKeyboardButton(f"{type_status_icon} 🧩 {item['name']}", callback_data="noop"))
         kb.row(
             types.InlineKeyboardButton("✏️ ویرایش", callback_data=f"admin:type:edit:{item['id']}"),
             types.InlineKeyboardButton("🗑 حذف",    callback_data=f"admin:type:del:{item['id']}"),
@@ -31,11 +34,13 @@ def _show_admin_types(call):
             f"➕ افزودن پکیج برای {item['name']}",
             callback_data=f"admin:pkg:add:t:{item['id']}"
         ))
-        packs = get_packages(type_id=item['id'], include_inactive=False)
+        packs = get_packages(type_id=item['id'], include_inactive=True)
         for p in packs:
+            pkg_active = p["active"] if "active" in p.keys() else 1
+            pkg_status_icon = "✅" if pkg_active else "❌"
             kb.row(
                 types.InlineKeyboardButton(
-                    f"📦 {p['name']} | {p['volume_gb']}GB | {fmt_price(p['price'])}ت",
+                    f"{pkg_status_icon} 📦 {p['name']} | {p['volume_gb']}GB | {fmt_price(p['price'])}ت",
                     callback_data="noop"
                 ),
                 types.InlineKeyboardButton("✏️", callback_data=f"admin:pkg:edit:{p['id']}"),
@@ -116,37 +121,66 @@ def _show_perm_selection(call, uid, target_id, perms, edit_mode=False):
 
 
 # ── Users list & detail ────────────────────────────────────────────────────────
-def _show_admin_users_list(call, page=0):
+def _show_admin_users_list(call, page=0, filter_mode="all"):
     from ..db import get_users, count_all_users
-    rows  = get_users()
-    total = count_all_users()
-    rows  = sorted(rows, key=lambda r: (r["full_name"] or "").lower())
-    per_page    = 10
-    total_pages = max(1, (len(rows) + per_page - 1) // per_page)
-    page        = max(0, min(page, total_pages - 1))
-    page_rows   = rows[page * per_page:(page + 1) * per_page]
+    PER_PAGE = 12
+    # Map filter_mode to has_purchase arg
+    hp = None
+    if filter_mode == "buyers":
+        hp = True
+    elif filter_mode == "new":
+        hp = False
+
+    # DB-level pagination — no Python re-sort, newest users first
+    # We need total for this filter to build pages
+    all_count_q_rows = get_users(has_purchase=hp)
+    total_filtered   = len(all_count_q_rows)
+    total_pages      = max(1, (total_filtered + PER_PAGE - 1) // PER_PAGE)
+    page             = max(0, min(page, total_pages - 1))
+    page_rows        = get_users(has_purchase=hp, limit=PER_PAGE, offset=page * PER_PAGE)
+
+    total, buyers, new_today = count_users_stats()
+
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("🔍 جستجوی کاربر", callback_data="adm:usr:search"))
+
+    # Filter bar
+    all_icon    = "▶️ " if filter_mode == "all"    else ""
+    buyers_icon = "▶️ " if filter_mode == "buyers" else ""
+    new_icon    = "▶️ " if filter_mode == "new"    else ""
+    kb.row(
+        types.InlineKeyboardButton(f"{all_icon}همه ({total})",          callback_data="adm:usr:fl:all:0"),
+        types.InlineKeyboardButton(f"{buyers_icon}خریداران ({buyers})", callback_data="adm:usr:fl:buyers:0"),
+        types.InlineKeyboardButton(f"{new_icon}بدون خرید",              callback_data="adm:usr:fl:new:0"),
+    )
+
     for row in page_rows:
         status_icon = "🔘" if row["status"] == "safe" else "⚠️"
         agent_icon  = "🤝" if row["is_agent"] else ""
-        label = f"{status_icon}{agent_icon} {row['full_name']} | {display_username(row['username'])}"
+        buy_icon    = f" 🛍{row['purchase_count']}" if row["purchase_count"] else ""
+        name_part   = row["full_name"] or f"بدون نام ({row['user_id']})"
+        uname_part  = f" | @{row['username']}" if row["username"] else ""
+        label       = f"{status_icon}{agent_icon} {name_part}{uname_part}{buy_icon}"
         kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:v:{row['user_id']}"))
+
     nav = []
     if page > 0:
-        nav.append(types.InlineKeyboardButton("⬅️ قبلی", callback_data=f"admin:users:pg:{page - 1}"))
+        nav.append(types.InlineKeyboardButton("⬅️ قبلی", callback_data=f"adm:usr:fl:{filter_mode}:{page - 1}"))
     if page < total_pages - 1:
-        nav.append(types.InlineKeyboardButton("➡️ بعدی", callback_data=f"admin:users:pg:{page + 1}"))
+        nav.append(types.InlineKeyboardButton("➡️ بعدی", callback_data=f"adm:usr:fl:{filter_mode}:{page + 1}"))
     if nav:
         kb.row(*nav)
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
-    send_or_edit(
-        call,
+
+    text = (
         f"👥 <b>مدیریت کاربران</b>\n\n"
-        f"👤 تعداد کل کاربران: <b>{total}</b> نفر\n"
-        f"📄 صفحه {page + 1} از {total_pages}",
-        kb
+        f"👤 کل کاربران: <b>{total}</b>\n"
+        f"🛍 خریداران: <b>{buyers}</b>\n"
+        f"📭 بدون خرید: <b>{total - buyers}</b>\n"
+        f"🆕 امروز: <b>{new_today}</b>\n\n"
+        f"📄 صفحه {page + 1} از {total_pages} | نمایش: {total_filtered} نفر"
     )
+    send_or_edit(call, text, kb)
 
 
 def _show_admin_user_detail(call, user_id):

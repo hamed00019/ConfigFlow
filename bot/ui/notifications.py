@@ -4,6 +4,7 @@ User and admin notification helpers: purchase delivery, admin alerts,
 pending-order fulfillment.
 """
 import io
+import json
 import qrcode
 from telebot import types
 
@@ -12,7 +13,7 @@ from ..db import (
     get_purchase, get_user, get_package, get_conn,
     assign_config_to_user, get_available_configs_for_package,
     fulfill_pending_order, get_waiting_pending_orders_for_package,
-    get_pending_order,
+    get_pending_order, get_all_admin_users,
 )
 from ..helpers import esc, fmt_price
 from ..bot_instance import bot
@@ -70,6 +71,17 @@ def admin_purchase_notify(method_label, user_row, package_row):
             bot.send_message(admin_id, text)
         except Exception:
             pass
+    for row in get_all_admin_users():
+        sub_id = row["user_id"]
+        if sub_id in ADMIN_IDS:
+            continue
+        perms = json.loads(row["permissions"] or "{}")
+        if not (perms.get("full") or perms.get("approve_payments")):
+            continue
+        try:
+            bot.send_message(sub_id, text)
+        except Exception:
+            pass
 
 
 def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_label):
@@ -97,6 +109,17 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
             bot.send_message(admin_id, text, reply_markup=kb)
         except Exception:
             pass
+    for row in get_all_admin_users():
+        sub_id = row["user_id"]
+        if sub_id in ADMIN_IDS:
+            continue
+        perms = json.loads(row["permissions"] or "{}")
+        if not (perms.get("full") or perms.get("approve_renewal")):
+            continue
+        try:
+            bot.send_message(sub_id, text, reply_markup=kb)
+        except Exception:
+            pass
 
 
 def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, method):
@@ -122,6 +145,17 @@ def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, met
     for admin_id in ADMIN_IDS:
         try:
             bot.send_message(admin_id, text, reply_markup=kb)
+        except Exception:
+            pass
+    for row in get_all_admin_users():
+        sub_id = row["user_id"]
+        if sub_id in ADMIN_IDS:
+            continue
+        perms = json.loads(row["permissions"] or "{}")
+        if not (perms.get("full") or perms.get("approve_payments") or perms.get("approve_renewal")):
+            continue
+        try:
+            bot.send_message(sub_id, text, reply_markup=kb)
         except Exception:
             pass
 

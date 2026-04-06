@@ -4,6 +4,7 @@ Payment logic: pricing, gateway selection UI, payment-to-admins dispatch,
 card payment approval and rejection.
 """
 from telebot import types
+import json
 
 from .config import ADMIN_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS
 from .db import (
@@ -11,6 +12,7 @@ from .db import (
     approve_payment, reject_payment, complete_payment,
     update_balance, reserve_first_config, release_reserved_config,
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
+    get_all_admin_users,
 )
 from .helpers import esc, fmt_price, display_username, back_button
 import time
@@ -201,6 +203,21 @@ def send_payment_to_admins(payment_id):
                 bot.send_photo(admin_id, payment["receipt_file_id"], caption=text, reply_markup=kb)
             else:
                 bot.send_message(admin_id, text, reply_markup=kb)
+        except Exception:
+            pass
+    # Also notify sub-admins with approve_payments permission
+    for row in get_all_admin_users():
+        sub_id = row["user_id"]
+        if sub_id in ADMIN_IDS:
+            continue
+        perms = json.loads(row["permissions"] or "{}")
+        if not (perms.get("full") or perms.get("approve_payments")):
+            continue
+        try:
+            if payment["receipt_file_id"]:
+                bot.send_photo(sub_id, payment["receipt_file_id"], caption=text, reply_markup=kb)
+            else:
+                bot.send_message(sub_id, text, reply_markup=kb)
         except Exception:
             pass
 

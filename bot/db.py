@@ -34,7 +34,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS config_types (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT NOT NULL UNIQUE,
-                description TEXT NOT NULL DEFAULT ''
+                description TEXT NOT NULL DEFAULT '',
+                is_active   INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS packages (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,6 +208,7 @@ def init_db():
             "ALTER TABLE packages ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE config_types ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE panel_packages ADD COLUMN inbound_id INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE config_types ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
         ]
         for sql in migrations:
             try:
@@ -285,7 +287,7 @@ def notify_first_start_if_needed(tg_user):
             pass
 
 
-def get_users(has_purchase=None):
+def get_users(has_purchase=None, limit=None, offset=0):
     q = (
         "SELECT u.*, "
         "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count "
@@ -296,6 +298,8 @@ def get_users(has_purchase=None):
     elif has_purchase is False:
         q += " AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
     q += " ORDER BY u.user_id DESC"
+    if limit is not None:
+        q += f" LIMIT {int(limit)} OFFSET {int(offset)}"
     with get_conn() as conn:
         return conn.execute(q).fetchall()
 
@@ -316,6 +320,21 @@ def get_user_detail(user_id):
 def count_all_users():
     with get_conn() as conn:
         return conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+
+
+def count_users_stats():
+    """Return (total, with_purchase, new_today)."""
+    from .helpers import now_str
+    today = now_str()[:10]  # YYYY-MM-DD
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+        buyers = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM purchases"
+        ).fetchone()["n"]
+        new_today = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE joined_at LIKE ?", (f"{today}%",)
+        ).fetchone()["n"]
+    return total, buyers, new_today
 
 
 def search_users(query):
@@ -364,6 +383,13 @@ def get_all_types():
         ).fetchall()
 
 
+def get_active_types():
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM config_types WHERE is_active=1 ORDER BY id DESC"
+        ).fetchall()
+
+
 def get_type(type_id):
     with get_conn() as conn:
         return conn.execute(
@@ -391,6 +417,13 @@ def update_type_description(type_id, description):
         conn.execute(
             "UPDATE config_types SET description=? WHERE id=?",
             (description.strip(), type_id)
+        )
+
+
+def update_type_active(type_id, is_active):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_types SET is_active=? WHERE id=?", (is_active, type_id)
         )
 
 
@@ -449,6 +482,13 @@ def add_package(type_id, name, volume_gb, duration_days, price):
             "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position)"
             " VALUES(?,?,?,?,?,1,?)",
             (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1)
+        )
+
+
+def toggle_package_active(package_id):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE packages SET active=((active+1)%2) WHERE id=?", (package_id,)
         )
 
 
