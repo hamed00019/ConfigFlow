@@ -517,6 +517,28 @@ def _dispatch_callback(call, uid, data):
         show_crypto_selection(call, amount=price)
         return
 
+    def _swapwallet_error_inline(call, err_msg):
+        """نمایش خطای SwapWallet به صورت inline با راهنمای تنظیمات."""
+        if "APPLICATION_NOT_FOUND" in err_msg or "Application not found" in err_msg:
+            detail = (
+                "⚙️ <b>راه‌حل:</b>\n"
+                "در SwapWallet باید یک <b>فروشگاه (Shop)</b> ثبت کرده باشید.\n"
+                "نام کاربری <u>فروشگاه</u> را وارد کنید، نه نام کاربری اکانت شخصی!\n\n"
+                "مراحل:\n"
+                "۱. اپ SwapWallet را باز کنید\n"
+                "۲. بخش <b>فروشگاه/Shop</b> را پیدا کنید\n"
+                "۳. یک فروشگاه جدید بسازید\n"
+                "۴. نام کاربری آن فروشگاه را در ربات وارد کنید"
+            )
+        else:
+            detail = f"جزئیات: <code>{esc(err_msg[:300])}</code>"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"❌ <b>خطا در اتصال به SwapWallet</b>\n\n{detail}",
+            kb)
+
     if data.startswith("rpay:swapwallet:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -570,7 +592,7 @@ def _dispatch_callback(call, uid, data):
         success, result = create_swapwallet_invoice(price, order_id, f"تمدید {package_row['name']}")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"❌ خطا در ایجاد فاکتور:\n{err_msg}", show_alert=True)
+            _swapwallet_error_inline(call, err_msg)
             return
         invoice_id    = result.get("id", "")
         payment_links = result.get("paymentLinks", [])
@@ -1006,7 +1028,7 @@ def _dispatch_callback(call, uid, data):
         success, result = create_swapwallet_invoice(price, order_id, f"خرید {package_row['name']}")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"❌ خطا در ایجاد فاکتور:\n{err_msg}", show_alert=True)
+            _swapwallet_error_inline(call, err_msg)
             return
         invoice_id    = result.get("id", "")
         payment_links = result.get("paymentLinks", [])
@@ -1275,7 +1297,7 @@ def _dispatch_callback(call, uid, data):
         success, result = create_swapwallet_invoice(amount, order_id, "شارژ کیف پول")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"❌ خطا در ایجاد فاکتور:\n{err_msg}", show_alert=True)
+            _swapwallet_error_inline(call, err_msg)
             return
         invoice_id    = result.get("id", "")
         payment_links = result.get("paymentLinks", [])
@@ -1449,7 +1471,7 @@ def _dispatch_callback(call, uid, data):
         success, result = create_swapwallet_crypto_invoice(amount, order_id, network, desc)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"❌ خطا در ایجاد فاکتور:\n{err_msg}", show_alert=True)
+            _swapwallet_error_inline(call, err_msg)
             return
         invoice_id = result.get("id", "")
         if kind == "wallet_charge":
