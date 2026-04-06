@@ -980,6 +980,46 @@ def _dispatch_callback(call, uid, data):
         show_main_menu(call)
         return
 
+    if data == "pm:swapwallet":
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
+            return
+        order_id = f"wallet-{uid}-{int(datetime.now().timestamp())}"
+        success, result = create_swapwallet_invoice(amount, order_id, "شارژ کیف پول")
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            _swapwallet_error_inline(call, err_msg)
+            return
+        invoice_id    = result.get("id", "")
+        payment_links = result.get("paymentLinks", [])
+        payment_id = create_payment("wallet_charge", uid, None, amount, "swapwallet", status="pending")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+        state_set(uid, "await_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id)
+        bot.answer_callback_query(call.id)
+        show_swapwallet_page(call, amount_toman=amount, invoice_id=invoice_id,
+                             payment_links=payment_links, payment_id=payment_id,
+                             verify_cb=f"pay:swapwallet:verify:{payment_id}")
+        return
+
+    if data == "pm:swapwallet_crypto":
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
+            return
+        from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
+        state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount)
+        kb = types.InlineKeyboardMarkup()
+        for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
+            kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
+        return
+
     # ── SwapWallet ────────────────────────────────────────────────────────────
     if data.startswith("pay:swapwallet:verify:"):
         payment_id = int(data.split(":")[3])
