@@ -6,7 +6,11 @@ BASE_DIR="/opt/configflow"
 BASE_SERVICE="configflow"
 DIR=""
 SERVICE=""
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${BASH_SOURCE[0]:-}" == /dev/fd/* ]] || [[ "${BASH_SOURCE[0]:-}" == /proc/*/fd/* ]]; then
+  SCRIPT_DIR="$(pwd)"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
 R='\033[31m'; G='\033[32m'; Y='\033[33m'; C='\033[36m'; M='\033[35m'; B='\033[1m'; W='\033[97m'; N='\033[0m'
 
@@ -438,6 +442,8 @@ select_instance() {
 }
 
 main() {
+  # When run via bash <(curl ...), stdin may be the pipe — redirect to terminal
+  [[ -t 0 ]] || exec < /dev/tty
   check_root
   ensure_safe_cwd
   select_instance
