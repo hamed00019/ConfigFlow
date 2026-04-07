@@ -9,6 +9,7 @@ import json
 from .config import ADMIN_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS
 from .db import (
     get_user, get_payment, get_package, get_agency_price,
+    get_agency_price_config, get_agency_type_discount,
     approve_payment, reject_payment, complete_payment,
     update_balance, reserve_first_config, release_reserved_config,
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
@@ -40,13 +41,32 @@ def _get_prices() -> dict:
 
 # ── Pricing ────────────────────────────────────────────────────────────────────
 def get_effective_price(user_id, package_row):
-    """Return agency price if user is agent and has a custom price, else regular price."""
+    """Return discounted price for agents, else regular price."""
     user = get_user(user_id)
-    if user and user["is_agent"]:
+    if not user or not user["is_agent"]:
+        return package_row["price"]
+    base  = package_row["price"]
+    cfg   = get_agency_price_config(user_id)
+    mode  = cfg["price_mode"]
+    if mode == "global":
+        g_type = cfg["global_type"]
+        g_val  = cfg["global_val"]
+        if g_type == "pct":
+            return max(0, base - round(base * g_val / 100))
+        else:
+            return max(0, base - g_val)
+    elif mode == "type":
+        type_id = package_row["type_id"]
+        td = get_agency_type_discount(user_id, type_id)
+        if td:
+            if td["discount_type"] == "pct":
+                return max(0, base - round(base * td["discount_value"] / 100))
+            else:
+                return max(0, base - td["discount_value"])
+        return base
+    else:  # package (default)
         ap = get_agency_price(user_id, package_row["id"])
-        if ap is not None:
-            return ap
-    return package_row["price"]
+        return ap if ap is not None else base
 
 
 # ── Payment method selection ───────────────────────────────────────────────────

@@ -96,6 +96,19 @@ def init_db():
                 price      INTEGER NOT NULL,
                 UNIQUE(user_id, package_id)
             );
+            CREATE TABLE IF NOT EXISTS agency_price_config (
+                user_id     INTEGER PRIMARY KEY,
+                price_mode  TEXT NOT NULL DEFAULT 'package',
+                global_type TEXT NOT NULL DEFAULT 'pct',
+                global_val  INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS agency_type_discount (
+                user_id        INTEGER NOT NULL,
+                type_id        INTEGER NOT NULL,
+                discount_type  TEXT NOT NULL DEFAULT 'pct',
+                discount_value INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(user_id, type_id)
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT
@@ -220,6 +233,8 @@ def init_db():
             "group_topic_test_report":      "",
             "group_topic_broadcast_report": "",
             "group_topic_error_log":        "",
+            "agency_request_enabled":       "1",
+            "agency_default_discount_pct":  "20",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -782,6 +797,53 @@ def set_agency_price(user_id, package_id, price):
             "ON CONFLICT(user_id,package_id) DO UPDATE SET price=excluded.price",
             (user_id, package_id, price)
         )
+
+
+def get_agency_price_config(user_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM agency_price_config WHERE user_id=?", (user_id,)
+        ).fetchone()
+    if row:
+        return dict(row)
+    return {"price_mode": "package", "global_type": "pct", "global_val": 0}
+
+
+def set_agency_price_config(user_id, price_mode, global_type="pct", global_val=0):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO agency_price_config(user_id,price_mode,global_type,global_val) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET price_mode=excluded.price_mode,"
+            "global_type=excluded.global_type,global_val=excluded.global_val",
+            (user_id, price_mode, global_type, global_val)
+        )
+
+
+def get_agency_type_discount(user_id, type_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM agency_type_discount WHERE user_id=? AND type_id=?",
+            (user_id, type_id)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_agency_type_discount(user_id, type_id, discount_type, discount_value):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO agency_type_discount(user_id,type_id,discount_type,discount_value) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id,type_id) DO UPDATE SET discount_type=excluded.discount_type,"
+            "discount_value=excluded.discount_value",
+            (user_id, type_id, discount_type, discount_value)
+        )
+
+
+def get_agencies():
+    """Return all users with is_agent=1."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM users WHERE is_agent=1 ORDER BY user_id DESC"
+        ).fetchall()
 
 
 # ── Payments ───────────────────────────────────────────────────────────────────

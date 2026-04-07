@@ -25,6 +25,9 @@ from ..db import (
     assign_config_to_user, reserve_first_config, release_reserved_config,
     get_payment, create_payment, approve_payment, reject_payment, complete_payment,
     get_agency_price, set_agency_price,
+    get_agency_price_config, set_agency_price_config,
+    get_agency_type_discount, set_agency_type_discount,
+    get_agencies,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
     get_all_panels, get_panel, add_panel, delete_panel,
     get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
@@ -52,10 +55,6 @@ from ..ui.notifications import (
 from ..group_manager import (
     ensure_group_topics, reset_and_recreate_topics, get_group_id,
     _count_active_topics, TOPICS, send_to_topic,
-)
-from ..group_manager import (
-    ensure_group_topics, reset_and_recreate_topics, get_group_id, _count_active_topics, TOPICS,
-    send_to_topic,
 )
 from ..payments import (
     get_effective_price, show_payment_method_selection,
@@ -501,12 +500,29 @@ def _dispatch_callback(call, uid, data):
         state_clear(uid)
         with get_conn() as conn:
             conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
+        # Apply default discount
+        default_pct = int(setting_get("agency_default_discount_pct", "20") or "20")
+        if default_pct > 0:
+            set_agency_price_config(target_uid, "global", "pct", default_pct)
         bot.answer_callback_query(call.id, "✅ نمایندگی تأیید شد.")
         _show_admin_user_detail(call, target_uid)
         try:
-            bot.send_message(target_uid, "🎉 <b>درخواست نمایندگی شما تأیید شد!</b>\n\nاکنون شما نماینده هستید.")
+            msg = "🎉 <b>درخواست نمایندگی شما تأیید شد!</b>\n\nاکنون شما نماینده هستید."
+            bot.send_message(target_uid, msg)
         except Exception:
             pass
+        if default_pct > 0:
+            confirm_text = (
+                f"✅ نمایندگی کاربر <code>{target_uid}</code> تأیید شد.\n\n"
+                f"📊 به صورت پیش‌فرض <b>{default_pct}%</b> تخفیف روی همه پکیج‌ها برای ایشان تعیین شد.\n"
+                "برای تغییر درصد کلی یا تعیین قیمت تکتک دکمه زیر را بزنید:"
+            )
+            kb_confirm = types.InlineKeyboardMarkup()
+            kb_confirm.add(types.InlineKeyboardButton(
+                "💰 قیمت نمایندگی کاربر",
+                callback_data=f"adm:agcfg:{target_uid}"
+            ))
+            bot.send_message(call.message.chat.id, confirm_text, reply_markup=kb_confirm)
         return
 
     if data.startswith("agency:reject:"):
@@ -2987,12 +3003,226 @@ def _dispatch_callback(call, uid, data):
             pass
         return
 
+    # ── Admin: Agents management ──────────────────────────────────────────────
+    if data == "admin:agents":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agents = get_agencies()
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
+        kb.add(types.InlineKeyboardButton(f"📋 لیست نمایندگان ({len(agents)})", callback_data="adm:agt:list"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        send_or_edit(call,
+            f"🤝 <b>مدیریت نمایندگان</b>\n\n"
+            f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>",
+            kb)
+        return
+
+    if data == "adm:agt:add":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_agent_add_search")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔍 <b>جستجوی کاربر برای افزودن به نمایندگی</b>\n\n"
+            "آیدی عددی یا یوزرنیم کاربر را ارسال کنید:",
+            back_button("admin:agents"))
+        return
+
+    if data == "adm:agt:list":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agents = get_agencies()
+        bot.answer_callback_query(call.id)
+        if not agents:
+            send_or_edit(call, "📋 هیچ نماینده‌ای ثبت نشده است.", back_button("admin:agents"))
+            return
+        kb = types.InlineKeyboardMarkup()
+        for ag in agents:
+            name = ag["full_name"] or str(ag["user_id"])
+            kb.add(types.InlineKeyboardButton(
+                f"🤝 {name} | {ag['user_id']}",
+                callback_data=f"adm:agt:u:{ag['user_id']}"
+            ))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:agents"))
+        send_or_edit(call, f"📋 <b>لیست نمایندگان ({len(agents)})</b>", kb)
+        return
+
+    if data.startswith("adm:agt:u:"):
+        target_uid = int(data.split(":")[3])
+        bot.answer_callback_query(call.id)
+        _show_admin_user_detail(call, target_uid)
+        return
+
+    # ── Agency price config (3-mode) ──────────────────────────────────────────
+    if data.startswith("adm:agcfg:") and not data.count(":") > 3:
+        # adm:agcfg:{target_id}  — show mode selector
+        parts     = data.split(":")
+        target_id = int(parts[2])
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cfg  = get_agency_price_config(target_id)
+        mode = cfg["price_mode"]
+        tick = {m: "✅ " for m in ["global", "type", "package"]}
+        for k in tick:
+            tick[k] = "✅ " if mode == k else ""
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            f"{tick['global']}🌍 تخفیف روی کل محصولات",
+            callback_data=f"adm:agcfg:global:{target_id}"))
+        kb.add(types.InlineKeyboardButton(
+            f"{tick['type']}🧩 تخفیف روی هر دسته",
+            callback_data=f"adm:agcfg:type:{target_id}"))
+        kb.add(types.InlineKeyboardButton(
+            f"{tick['package']}📦 قیمت جداگانه هر پکیج",
+            callback_data=f"adm:agcfg:pkg:{target_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+        bot.answer_callback_query(call.id)
+        target_user = get_user(target_id)
+        uname = esc(target_user["full_name"]) if target_user else str(target_id)
+        mode_labels = {"global": "🌍 تخفیف کل محصولات", "type": "🧩 تخفیف هر دسته", "package": "📦 قیمت هر پکیج"}
+        send_or_edit(call,
+            f"💰 <b>قیمت نمایندگی کاربر</b>\n"
+            f"👤 {uname}\n\n"
+            f"حالت فعلی: <b>{mode_labels.get(mode, mode)}</b>\n\n"
+            "حالت مورد نظر را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("adm:agcfg:global:") and data.count(":") == 3:
+        # adm:agcfg:global:{target_id}  — choose pct or toman
+        target_id = int(data.split(":")[3])
+        cfg = get_agency_price_config(target_id)
+        g_type = cfg["global_type"]
+        g_val  = cfg["global_val"]
+        cur_label = f"{'درصد' if g_type == 'pct' else 'تومان'} — مقدار فعلی: {g_val}"
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agcfg:glb:pct:{target_id}"),
+            types.InlineKeyboardButton("💵 تومان", callback_data=f"adm:agcfg:glb:tmn:{target_id}"),
+        )
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:{target_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🌍 <b>تخفیف کل محصولات</b>\n\n"
+            f"تنظیم فعلی: <b>{cur_label}</b>\n\n"
+            "می‌خواهی درصد کم بشه یا مبلغ ثابت (تومان)؟", kb)
+        return
+
+    if data.startswith("adm:agcfg:glb:"):
+        # adm:agcfg:glb:pct:{target_id}  or  adm:agcfg:glb:tmn:{target_id}
+        parts     = data.split(":")
+        dtype     = parts[3]   # pct or tmn
+        target_id = int(parts[4])
+        set_agency_price_config(target_id, "global", "pct" if dtype == "pct" else "toman", 0)
+        state_set(uid, "admin_agcfg_global_val", target_user_id=target_id, dtype=dtype)
+        bot.answer_callback_query(call.id)
+        label = "درصد تخفیف (مثال: 20)" if dtype == "pct" else "مبلغ تخفیف به تومان (مثال: 50000)"
+        send_or_edit(call,
+            f"🌍 <b>تخفیف کل محصولات</b>\n\n"
+            f"{'📊' if dtype == 'pct' else '💵'} {label} را وارد کنید:",
+            back_button(f"adm:agcfg:global:{target_id}"))
+        return
+
+    if data.startswith("adm:agcfg:type:") and data.count(":") == 3:
+        # adm:agcfg:type:{target_id}  — show types list
+        target_id = int(data.split(":")[3])
+        types_list = get_all_types()
+        if not types_list:
+            bot.answer_callback_query(call.id, "هیچ نوعی تعریف نشده.", show_alert=True)
+            return
+        set_agency_price_config(target_id, "type",
+            get_agency_price_config(target_id)["global_type"],
+            get_agency_price_config(target_id)["global_val"])
+        kb = types.InlineKeyboardMarkup()
+        for t in types_list:
+            td = get_agency_type_discount(target_id, t["id"])
+            if td:
+                dot = "✅"
+                val_lbl = f"{td['discount_value']}{'%' if td['discount_type']=='pct' else 'ت'}"
+            else:
+                dot = "⬜️"
+                val_lbl = "تنظیم نشده"
+            kb.add(types.InlineKeyboardButton(
+                f"{dot} {t['name']} | {val_lbl}",
+                callback_data=f"adm:agcfg:td:{target_id}:{t['id']}"
+            ))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:{target_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🧩 <b>تخفیف هر دسته</b>\n\nدسته مورد نظر را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("adm:agcfg:td:") and data.count(":") == 4:
+        # adm:agcfg:td:{target_id}:{type_id}  — choose pct or toman for this type
+        parts     = data.split(":")
+        target_id = int(parts[3])
+        type_id   = int(parts[4])
+        type_row  = get_type(type_id) if hasattr(__import__('bot.db', fromlist=['get_type']), 'get_type') else None
+        td = get_agency_type_discount(target_id, type_id)
+        cur_label = f"{'درصد' if td['discount_type']=='pct' else 'تومان'} — {td['discount_value']}" if td else "تنظیم نشده"
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agcfg:tdt:{target_id}:{type_id}:pct"),
+            types.InlineKeyboardButton("💵 تومان", callback_data=f"adm:agcfg:tdt:{target_id}:{type_id}:tmn"),
+        )
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:type:{target_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🧩 <b>دسته #{type_id}</b>\n\n"
+            f"تنظیم فعلی: <b>{cur_label}</b>\n\n"
+            "می‌خواهی درصد کم بشه یا مبلغ ثابت؟", kb)
+        return
+
+    if data.startswith("adm:agcfg:tdt:"):
+        # adm:agcfg:tdt:{target_id}:{type_id}:pct  or  :tmn
+        parts     = data.split(":")
+        target_id = int(parts[3])
+        type_id   = int(parts[4])
+        dtype     = parts[5]
+        state_set(uid, "admin_agcfg_type_val",
+                  target_user_id=target_id, type_id=type_id, dtype=dtype)
+        bot.answer_callback_query(call.id)
+        label = "درصد (مثال: 15)" if dtype == "pct" else "مبلغ تومان (مثال: 30000)"
+        send_or_edit(call,
+            f"🧩 دسته #{type_id}\n\n"
+            f"{'📊' if dtype == 'pct' else '💵'} {label} را وارد کنید:",
+            back_button(f"adm:agcfg:td:{target_id}:{type_id}"))
+        return
+
+    if data.startswith("adm:agcfg:pkg:"):
+        # adm:agcfg:pkg:{target_id}  — show packages (existing flow)
+        target_id = int(data.split(":")[3])
+        set_agency_price_config(target_id, "package",
+            get_agency_price_config(target_id)["global_type"],
+            get_agency_price_config(target_id)["global_val"])
+        packs = get_packages()
+        if not packs:
+            bot.answer_callback_query(call.id, "پکیجی موجود نیست.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        for p in packs:
+            ap    = get_agency_price(target_id, p["id"])
+            price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
+            label = f"{p['name']} | {price} ت"
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:{target_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📦 <b>قیمت هر پکیج</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
+        return
+
     # ── Admin: Broadcast ──────────────────────────────────────────────────────
     if data == "admin:broadcast":
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("📣 همه کاربران",  callback_data="adm:bc:all"))
-        kb.add(types.InlineKeyboardButton("🛍 فقط مشتریان", callback_data="adm:bc:cust"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("📣 همه کاربران",             callback_data="adm:bc:all"))
+        kb.add(types.InlineKeyboardButton("🛍 فقط مشتریان (همه)",       callback_data="adm:bc:cust"))
+        kb.add(types.InlineKeyboardButton("👤 فقط مشتریان عادی",        callback_data="adm:bc:normal"))
+        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",           callback_data="adm:bc:agents"))
+        kb.add(types.InlineKeyboardButton("👑 فقط ادمین‌ها",            callback_data="adm:bc:admins"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت",                  callback_data="admin:panel"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📣 <b>فوروارد همگانی</b>\n\nگیرنده‌ها را انتخاب کنید:", kb)
         return
@@ -3008,6 +3238,27 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_broadcast_customers")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🛍 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>مشتریان</b> ارسال می‌شود.",
+                     back_button("admin:broadcast"))
+        return
+
+    if data == "adm:bc:normal":
+        state_set(uid, "admin_broadcast_normal")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "👤 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>مشتریان عادی</b> (بدون نمایندگان و ادمین‌ها) ارسال می‌شود.",
+                     back_button("admin:broadcast"))
+        return
+
+    if data == "adm:bc:agents":
+        state_set(uid, "admin_broadcast_agents")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🤝 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>نمایندگان</b> ارسال می‌شود.",
+                     back_button("admin:broadcast"))
+        return
+
+    if data == "adm:bc:admins":
+        state_set(uid, "admin_broadcast_admins")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "👑 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>ادمین‌ها</b> ارسال می‌شود.",
                      back_button("admin:broadcast"))
         return
 
@@ -3090,6 +3341,59 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
+        return
+
+    if data == "adm:set:agency_toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("agency_request_enabled", "1")
+        new = "0" if cur == "1" else "1"
+        setting_set("agency_request_enabled", new)
+        label = "فعال" if new == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"درخواست نمایندگی: {label}")
+        # re-render settings
+        _fake_call_data = type('obj', (object,), {
+            'id': call.id, 'message': call.message,
+            'data': 'admin:settings', 'from_user': call.from_user
+        })()
+        _fake_call_data.id = call.id
+        try:
+            agency_flag  = new
+            agency_icon  = "✅" if agency_flag == "1" else "❌"
+            pct          = setting_get("agency_default_discount_pct", "20")
+            kb           = types.InlineKeyboardMarkup()
+            kb.row(
+                types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:set:support"),
+                types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
+            )
+            kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
+            kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
+            kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
+            kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
+            kb.add(types.InlineKeyboardButton("🏷 تنظیمات فروش",    callback_data="adm:set:shop"))
+            kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
+            kb.add(types.InlineKeyboardButton(f"{agency_icon} درخواست نمایندگی", callback_data="adm:set:agency_toggle"))
+            kb.add(types.InlineKeyboardButton("📊 تخفیف پیش‌فرض نمایندگی", callback_data="adm:set:agency_defpct"))
+            kb.add(types.InlineKeyboardButton("💾 بکاپ",            callback_data="admin:backup"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
+            send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
+        except Exception:
+            pass
+        return
+
+    if data == "adm:set:agency_defpct":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur_pct = setting_get("agency_default_discount_pct", "20")
+        state_set(uid, "admin_set_default_discount_pct")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📊 <b>تخفیف پیش‌فرض نمایندگی</b>\n\n"
+            f"تنظیم فعلی: <b>{cur_pct}%</b>\n\n"
+            "درصد جدید را وارد کنید (عدد بین 0 تا 100):",
+            back_button("admin:settings"))
         return
 
     if data == "adm:set:support":

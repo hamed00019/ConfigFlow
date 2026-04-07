@@ -43,11 +43,7 @@ def show_profile(target, user_id):
     if user["is_agent"]:
         text += "\n\n🤝 <b>حساب نمایندگی فعال است</b>"
     kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("💳 شارژ کیف پول", callback_data="wallet:charge"),
-        types.InlineKeyboardButton("📦 کانفیگ‌های من", callback_data="my_configs"),
-    )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+    kb.add(types.InlineKeyboardButton(" بازگشت", callback_data="nav:main"))
     send_or_edit(target, text, kb)
 
 

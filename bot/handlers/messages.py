@@ -24,6 +24,8 @@ from ..db import (
     get_payment, create_payment, approve_payment, reject_payment, complete_payment,
     update_payment_receipt,
     get_agency_price, set_agency_price,
+    get_agency_price_config, set_agency_price_config,
+    get_agency_type_discount, set_agency_type_discount,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
     get_all_panels, get_panel, add_panel, delete_panel,
     get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
@@ -94,6 +96,71 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ پیام برای {sent} مشتری ارسال شد.", reply_markup=kb_admin_panel())
             from ..group_manager import send_to_topic as _stt
             _stt("broadcast_report", f"📢 <b>اطلاع‌رسانی (مشتریان)</b>\n\n✅ برای {sent} مشتری ارسال شد.")
+            return
+
+        if sn == "admin_broadcast_normal" and is_admin(uid):
+            from ..db import get_all_admin_users as _get_admins
+            admin_ids_set = set(ADMIN_IDS)
+            for _ar in _get_admins():
+                admin_ids_set.add(_ar["user_id"])
+            users = get_users(has_purchase=True)
+            sent  = 0
+            for u in users:
+                if u["user_id"] in admin_ids_set:
+                    continue
+                if u["is_agent"]:
+                    continue
+                try:
+                    bot.copy_message(u["user_id"], message.chat.id, message.message_id)
+                    sent += 1
+                except Exception:
+                    pass
+            state_clear(uid)
+            bot.send_message(uid, f"✅ پیام برای {sent} مشتری عادی ارسال شد.", reply_markup=kb_admin_panel())
+            from ..group_manager import send_to_topic as _stt
+            _stt("broadcast_report", f"📢 <b>اطلاع‌رسانی (مشتریان عادی)</b>\n\n✅ برای {sent} کاربر ارسال شد.")
+            return
+
+        if sn == "admin_broadcast_agents" and is_admin(uid):
+            users = get_users()
+            sent  = 0
+            for u in users:
+                if not u["is_agent"]:
+                    continue
+                try:
+                    bot.copy_message(u["user_id"], message.chat.id, message.message_id)
+                    sent += 1
+                except Exception:
+                    pass
+            state_clear(uid)
+            bot.send_message(uid, f"✅ پیام برای {sent} نماینده ارسال شد.", reply_markup=kb_admin_panel())
+            from ..group_manager import send_to_topic as _stt
+            _stt("broadcast_report", f"📢 <b>اطلاع‌رسانی (نمایندگان)</b>\n\n✅ برای {sent} نماینده ارسال شد.")
+            return
+
+        if sn == "admin_broadcast_admins" and is_admin(uid):
+            from ..db import get_all_admin_users as _get_admins
+            sent  = 0
+            # ADMIN_IDS
+            for aid in ADMIN_IDS:
+                try:
+                    bot.copy_message(aid, message.chat.id, message.message_id)
+                    sent += 1
+                except Exception:
+                    pass
+            # Sub-admins
+            for _ar in _get_admins():
+                if _ar["user_id"] in ADMIN_IDS:
+                    continue
+                try:
+                    bot.copy_message(_ar["user_id"], message.chat.id, message.message_id)
+                    sent += 1
+                except Exception:
+                    pass
+            state_clear(uid)
+            bot.send_message(uid, f"✅ پیام برای {sent} ادمین ارسال شد.", reply_markup=kb_admin_panel())
+            from ..group_manager import send_to_topic as _stt
+            _stt("broadcast_report", f"📢 <b>اطلاع‌رسانی (ادمین‌ها)</b>\n\n✅ برای {sent} ادمین ارسال شد.")
             return
 
         # ── Wallet amount ──────────────────────────────────────────────────────
@@ -804,8 +871,121 @@ def universal_handler(message):
                 pass
             return
 
-        # ── Admin: Agency price ────────────────────────────────────────────────
+        # ── Admin: Agency price (per-package, mode=package) ─────────────────
         if sn == "admin_set_agency_price" and is_admin(uid):
+            target_user_id = sd["target_user_id"]
+            package_id     = sd["package_id"]
+            val            = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ مبلغ معتبر وارد کنید.", reply_markup=back_button("admin:users"))
+                return
+            if val == 0:
+                with get_conn() as conn:
+                    conn.execute("DELETE FROM agency_prices WHERE user_id=? AND package_id=?",
+                                 (target_user_id, package_id))
+                state_clear(uid)
+                bot.send_message(uid, "✅ قیمت اختصاصی حذف شد (قیمت پیش‌فرض اعمال می‌شود).",
+                                 reply_markup=kb_admin_panel())
+            else:
+                set_agency_price(target_user_id, package_id, val)
+                state_clear(uid)
+                bot.send_message(uid, f"✅ قیمت اختصاصی {fmt_price(val)} تومان ثبت شد.",
+                                 reply_markup=kb_admin_panel())
+            return
+
+        # ── Admin: Agency global discount value ────────────────────────────────
+        if sn == "admin_agcfg_global_val" and is_admin(uid):
+            target_user_id = sd["target_user_id"]
+            dtype          = sd.get("dtype", "pct")
+            val            = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.")
+                return
+            if dtype == "pct" and val > 100:
+                bot.send_message(uid, "⚠️ درصد بیشتر از 100 مجاز نیست.")
+                return
+            set_agency_price_config(target_user_id, "global",
+                "pct" if dtype == "pct" else "toman", val)
+            state_clear(uid)
+            label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
+            bot.send_message(uid,
+                f"✅ تخفیف کل محصولات: <b>{label}</b> تنظیم شد.",
+                reply_markup=kb_admin_panel())
+            return
+
+        # ── Admin: Agency type discount value ──────────────────────────────────
+        if sn == "admin_agcfg_type_val" and is_admin(uid):
+            target_user_id = sd["target_user_id"]
+            type_id        = sd.get("type_id")
+            dtype          = sd.get("dtype", "pct")
+            val            = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.")
+                return
+            if dtype == "pct" and val > 100:
+                bot.send_message(uid, "⚠️ درصد بیشتر از 100 مجاز نیست.")
+                return
+            set_agency_type_discount(target_user_id, type_id,
+                "pct" if dtype == "pct" else "toman", val)
+            state_clear(uid)
+            label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
+            bot.send_message(uid,
+                f"✅ تخفیف دسته #{type_id}: <b>{label}</b> تنظیم شد.",
+                reply_markup=kb_admin_panel())
+            return
+
+        # ── Admin: Default agency discount % ──────────────────────────────────
+        if sn == "admin_set_default_discount_pct" and is_admin(uid):
+            val = parse_int(message.text or "")
+            if val is None or val < 0 or val > 100:
+                bot.send_message(uid, "⚠️ عددی بین 0 تا 100 وارد کنید.")
+                return
+            setting_set("agency_default_discount_pct", str(val))
+            state_clear(uid)
+            bot.send_message(uid, f"✅ تخفیف پیش‌فرض نمایندگی به <b>{val}%</b> تغییر یافت.",
+                             reply_markup=back_button("admin:settings"))
+            return
+
+        # ── Admin: Add agent (search) ─────────────────────────────────────────
+        if sn == "admin_agent_add_search" and is_admin(uid):
+            raw = (message.text or "").strip()
+            target_user = None
+            if raw.lstrip("-").isdigit():
+                target_user = get_user(int(raw))
+            if not target_user:
+                results = search_users(raw)
+                if results:
+                    target_user = results[0]
+            if not target_user:
+                bot.send_message(uid, "⚠️ کاربری با این شناسه یافت نشد.",
+                                 reply_markup=back_button("admin:agents"))
+                return
+            state_clear(uid)
+            if target_user["is_agent"]:
+                bot.send_message(uid,
+                    f"ℹ️ کاربر <b>{esc(target_user['full_name'])}</b> قبلاً نماینده است.",
+                    reply_markup=back_button("admin:agents"))
+                return
+            set_user_agent(target_user["user_id"], 1)
+            default_pct = int(setting_get("agency_default_discount_pct", "20") or "20")
+            if default_pct > 0:
+                set_agency_price_config(target_user["user_id"], "global", "pct", default_pct)
+            kb_r = types.InlineKeyboardMarkup()
+            kb_r.add(types.InlineKeyboardButton(
+                "💰 قیمت نمایندگی",
+                callback_data=f"adm:agcfg:{target_user['user_id']}"
+            ))
+            kb_r.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:agents"))
+            bot.send_message(uid,
+                f"✅ کاربر <b>{esc(target_user['full_name'])}</b> (کد <code>{target_user['user_id']}</code>) به نماینده تبدیل شد.\n\n"
+                f"📊 تخفیف پیش‌فرض {default_pct}% اعمال شد.",
+                reply_markup=kb_r)
+            try:
+                bot.send_message(target_user["user_id"],
+                    "🎉 <b>شما به عنوان نماینده تمام سیستم اضافه شدید!</b>")
+            except Exception:
+                pass
+            return
             target_user_id = sd["target_user_id"]
             package_id     = sd["package_id"]
             val            = parse_int(message.text or "")
@@ -948,7 +1128,17 @@ def universal_handler(message):
             state_clear(uid)
             with get_conn() as conn:
                 conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
-            bot.send_message(uid, "✅ نمایندگی تأیید شد.")
+            default_pct = int(setting_get("agency_default_discount_pct", "20") or "20")
+            if default_pct > 0:
+                set_agency_price_config(target_uid, "global", "pct", default_pct)
+            kb_conf = types.InlineKeyboardMarkup()
+            kb_conf.add(types.InlineKeyboardButton(
+                "💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{target_uid}"))
+            kb_conf.add(types.InlineKeyboardButton(
+                "🔙 بازگشت", callback_data="admin:users"))
+            bot.send_message(uid,
+                f"✅ نمایندگی تأیید شد.\n📊 تخفیف پیش‌فرض {default_pct}% اعمال شد.",
+                reply_markup=kb_conf)
             _show_admin_user_detail_msg(uid, target_uid)
             try:
                 msg = "🎉 <b>درخواست نمایندگی شما تأیید شد!</b>\n\nاکنون شما نماینده هستید."

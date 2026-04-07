@@ -210,8 +210,7 @@ def _show_admin_user_detail(call, user_id):
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
-    if row["is_agent"]:
-        kb.add(types.InlineKeyboardButton("🏷 قیمت‌های نمایندگی", callback_data=f"adm:usr:agp:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
     send_or_edit(call, text, kb)
 
@@ -244,8 +243,7 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
-    if row["is_agent"]:
-        kb.add(types.InlineKeyboardButton("🏷 قیمت‌های نمایندگی", callback_data=f"adm:usr:agp:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
     bot.send_message(chat_id, text, reply_markup=kb)
 

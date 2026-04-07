@@ -22,7 +22,8 @@ def kb_main(user_id):
         types.InlineKeyboardButton("💳 شارژ کیف پول",   callback_data="wallet:charge"),
     )
     kb.add(types.InlineKeyboardButton("🎧 ارتباط با پشتیبانی", callback_data="support"))
-    kb.add(types.InlineKeyboardButton("🤝 درخواست نمایندگی", callback_data="agency:request"))
+    if setting_get("agency_request_enabled", "1") == "1":
+        kb.add(types.InlineKeyboardButton("🤝 درخواست نمایندگی", callback_data="agency:request"))
     if is_admin(user_id):
         kb.add(types.InlineKeyboardButton("⚙️ ورود به پنل مدیریت", callback_data="admin:panel"))
     return kb
@@ -58,6 +59,9 @@ def kb_admin_panel(uid=None):
 
     if is_owner or (uid and (admin_has_perm(uid, "broadcast_all") or admin_has_perm(uid, "broadcast_cust"))):
         kb.add(types.InlineKeyboardButton("📣 فوروارد همگانی", callback_data="admin:broadcast"))
+
+    if is_owner or (uid and admin_has_perm(uid, "agency")):
+        kb.add(types.InlineKeyboardButton("🤝 مدیریت نمایندگان", callback_data="admin:agents"))
 
     if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
         kb.add(types.InlineKeyboardButton("🖥 مدیریت پنل‌های 3x-ui", callback_data="admin:panels"))
