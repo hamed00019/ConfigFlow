@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
+import time
+import threading
 import traceback
 from datetime import datetime
 from telebot import types
@@ -264,6 +266,127 @@ def _swapwallet_error_inline(call, err_msg):
             bot.send_message(call.message.chat.id, msg, reply_markup=kb, parse_mode="HTML")
         except Exception:
             pass
+
+
+# ── TetraPay auto-verify thread ───────────────────────────────────────────────
+def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
+                          package_id=None):
+    """Background thread: polls TetraPay every 5s for up to 15 minutes."""
+    max_tries = 180  # 180 × 5s = 15 minutes
+    for _ in range(max_tries):
+        time.sleep(5)
+        payment = get_payment(payment_id)
+        if not payment or payment["status"] != "pending":
+            return  # Already processed by another path
+        success, _ = verify_tetrapay_order(authority)
+        if not success:
+            continue
+        # Payment confirmed — process it
+        try:
+            if kind == "wallet_charge":
+                update_balance(uid, payment["amount"])
+                complete_payment(payment_id)
+                state_clear(uid)
+                try:
+                    bot.edit_message_text(
+                        f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid,
+                        f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+
+            elif kind == "config_purchase":
+                pkg_row = get_package(package_id)
+                cfg_id = payment["config_id"]
+                if not cfg_id:
+                    cfg_id = reserve_first_config(package_id, payment_id)
+                if not cfg_id:
+                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "tetrapay")
+                    complete_payment(payment_id)
+                    state_clear(uid)
+                    msg_text = (
+                        "✅ پرداخت شما تأیید شد.\n\n"
+                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
+                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
+                        "🙏 از صبر شما متشکریم."
+                    )
+                    try:
+                        bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
+                                              reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
+                    notify_pending_order_to_admins(pending_id, uid, pkg_row, payment["amount"], "tetrapay")
+                    return
+                purchase_id_new = assign_config_to_user(cfg_id, uid, package_id, payment["amount"], "tetrapay", is_test=0)
+                complete_payment(payment_id)
+                state_clear(uid)
+                try:
+                    bot.edit_message_text("✅ پرداخت شما تأیید شد و سرویس آماده است.",
+                                          chat_id, message_id, parse_mode="HTML",
+                                          reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس آماده است.",
+                                     reply_markup=back_button("main"))
+                deliver_purchase_message(chat_id, purchase_id_new)
+                admin_purchase_notify("TetraPay", get_user(uid), pkg_row)
+
+            elif kind == "renewal":
+                pkg_row = get_package(package_id)
+                cfg_id = payment["config_id"]
+                with get_conn() as conn:
+                    row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
+                pid = row["purchase_id"] if row else 0
+                item = get_purchase(pid) if pid else None
+                complete_payment(payment_id)
+                state_clear(uid)
+                msg_text = (
+                    "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                    "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                    "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                    "🙏 از صبر و شکیبایی شما متشکریم."
+                )
+                try:
+                    bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
+                                          reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
+                if item:
+                    admin_renewal_notify(uid, item, pkg_row, payment["amount"], "TetraPay")
+
+        except Exception as e:
+            print("TETRAPAY_AUTO_VERIFY_ERROR:", e)
+        return  # Processed (success or error)
+
+    # Timeout — not verified after 15 minutes
+    payment = get_payment(payment_id)
+    if payment and payment["status"] == "pending":
+        state_clear(uid)
+        timeout_msg = (
+            "⏰ <b>مهلت بررسی پرداخت منقضی شد</b>\n\n"
+            "پرداخت شما در مدت زمان مقرر تأیید نشد.\n"
+            "اگر مبلغ از حساب شما کسر شده، لطفاً با پشتیبانی تماس بگیرید."
+        )
+        try:
+            bot.edit_message_text(timeout_msg, chat_id, message_id, parse_mode="HTML",
+                                  reply_markup=back_button("main"))
+        except Exception:
+            try:
+                bot.send_message(uid, timeout_msg, parse_mode="HTML", reply_markup=back_button("main"))
+            except Exception:
+                pass
+
+
+def _start_tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id,
+                                kind, package_id=None):
+    t = threading.Thread(
+        target=_tetrapay_auto_verify,
+        args=(payment_id, authority, uid, chat_id, message_id, kind),
+        kwargs={"package_id": package_id},
+        daemon=True,
+    )
+    t.start()
 
 
 def _dispatch_callback(call, uid, data):
@@ -691,17 +814,20 @@ def _dispatch_callback(call, uid, data):
             "🏦 <b>پرداخت آنلاین (تمدید)</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
             "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n"
-            "پس از پرداخت، دکمه «✅ بررسی پرداخت» را بزنید."
+            "⏳ پس از پرداخت، ربات به صورت خودکار آن را بررسی و ثبت می‌کند."
         )
         kb = types.InlineKeyboardMarkup()
         if pay_url_bot and setting_get("tetrapay_mode_bot", "1") == "1":
             kb.add(types.InlineKeyboardButton("💳 پرداخت در تلگرام", url=pay_url_bot))
         if pay_url_web and setting_get("tetrapay_mode_web", "1") == "1":
             kb.add(types.InlineKeyboardButton("🌐 پرداخت در مرورگر", url=pay_url_web))
-        kb.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"rpay:tetrapay:verify:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
+        _start_tetrapay_auto_verify(
+            payment_id, authority, uid,
+            call.message.chat.id, call.message.message_id,
+            "renewal", package_id=package_id)
         return
 
     if data.startswith("rpay:tetrapay:verify:"):
@@ -1132,17 +1258,20 @@ def _dispatch_callback(call, uid, data):
             "🏦 <b>پرداخت آنلاین (TetraPay)</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
             "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n"
-            "پس از پرداخت، دکمه «✅ بررسی پرداخت» را بزنید."
+            "⏳ پس از پرداخت، ربات به صورت خودکار آن را بررسی و تأیید می‌کند."
         )
         kb = types.InlineKeyboardMarkup()
         if pay_url_bot and setting_get("tetrapay_mode_bot", "1") == "1":
             kb.add(types.InlineKeyboardButton("💳 پرداخت در تلگرام", url=pay_url_bot))
         if pay_url_web and setting_get("tetrapay_mode_web", "1") == "1":
             kb.add(types.InlineKeyboardButton("🌐 پرداخت در مرورگر", url=pay_url_web))
-        kb.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:tetrapay:verify:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
+        _start_tetrapay_auto_verify(
+            payment_id, authority, uid,
+            call.message.chat.id, call.message.message_id,
+            "config_purchase", package_id=package_id)
         return
 
     # ── Free test ─────────────────────────────────────────────────────────────
@@ -1294,17 +1423,20 @@ def _dispatch_callback(call, uid, data):
             "🏦 <b>شارژ کیف پول - پرداخت آنلاین (TetraPay)</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
             "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n"
-            "پس از پرداخت، دکمه «✅ بررسی پرداخت» را بزنید."
+            "⏳ پس از پرداخت، ربات به صورت خودکار آن را بررسی و کیف پول شما را شارژ می‌کند."
         )
         kb = types.InlineKeyboardMarkup()
         if pay_url_bot and setting_get("tetrapay_mode_bot", "1") == "1":
             kb.add(types.InlineKeyboardButton("💳 پرداخت در تلگرام", url=pay_url_bot))
         if pay_url_web and setting_get("tetrapay_mode_web", "1") == "1":
             kb.add(types.InlineKeyboardButton("🌐 پرداخت در مرورگر", url=pay_url_web))
-        kb.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:tetrapay:verify:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
+        _start_tetrapay_auto_verify(
+            payment_id, authority, uid,
+            call.message.chat.id, call.message.message_id,
+            "wallet_charge")
         return
 
     if data == "wallet:charge:swapwallet":
