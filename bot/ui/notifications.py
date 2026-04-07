@@ -96,7 +96,7 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
         f"🆔 آیدی: <code>{user_row['user_id']}</code>\n"
         f"💰 مبلغ پرداختی: <b>{fmt_price(amount)}</b> تومان\n\n"
         f"📌 <b>سرویس فعلی:</b>\n"
-        f"🔮 نام: {esc(purchase_item['service_name'])}\n"
+        f"🔮 نام: {esc(urllib.parse.unquote(purchase_item['service_name'] or ''))}\n"
         f"🧩 نوع: {esc(purchase_item['type_name'])}\n\n"
         f"📦 <b>پکیج تمدید:</b>\n"
         f"✏️ نام: {esc(package_row['name'])}\n"

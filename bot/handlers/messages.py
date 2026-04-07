@@ -2,6 +2,7 @@
 import os
 import traceback
 import sqlite3
+import urllib.parse
 from datetime import datetime
 from telebot import types
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, CONFIGS_PER_PAGE, DB_NAME
@@ -748,7 +749,7 @@ def universal_handler(message):
                 return
             kb = types.InlineKeyboardMarkup()
             for r in rows:
-                label = r["service_name"] or f"#{r['id']}"
+                label = urllib.parse.unquote(r["service_name"] or "") or f"#{r['id']}"
                 if r["is_expired"]:
                     label = "⛔ " + label
                 elif r["sold_to"]:

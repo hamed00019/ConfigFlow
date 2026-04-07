@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import traceback
+import urllib.parse
 from datetime import datetime
 from telebot import types
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CONFIGS_PER_PAGE
@@ -156,8 +157,9 @@ def _render_bulk_page(call, uid):
 
     kb = types.InlineKeyboardMarkup()
     for c in cfgs:
-        mark = "✅" if c["id"] in selected else "⬜️"
-        kb.add(types.InlineKeyboardButton(f"{mark} {c['service_name']}", callback_data=f"adm:stk:btog:{c['id']}"))
+        mark     = "✅" if c["id"] in selected else "⬜️"
+        svc_name = urllib.parse.unquote(c["service_name"] or "")
+        kb.add(types.InlineKeyboardButton(f"{mark} {svc_name}", callback_data=f"adm:stk:btog:{c['id']}"))
 
     if not all_sel:
         kb.add(types.InlineKeyboardButton("☑️ انتخاب همه این صفحه", callback_data="adm:stk:bsall"))
@@ -574,7 +576,7 @@ def _dispatch_callback(call, uid, data):
                   kind="renewal", purchase_id=purchase_id)
         text = (
             "♻️ <b>تمدید سرویس</b>\n\n"
-            f"🔮 سرویس فعلی: {esc(item['service_name'])}\n"
+            f"🔮 سرویس فعلی: {esc(urllib.parse.unquote(item['service_name'] or ''))}\n"
             f"📦 پکیج تمدید: {esc(package_row['name'])}\n"
             f"🔋 حجم: {package_row['volume_gb']} گیگ\n"
             f"⏰ مدت: {package_row['duration_days']} روز\n"
@@ -2308,7 +2310,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "یافت نشد.", show_alert=True)
             return
         text = (
-            f"🔮 نام سرویس: <b>{esc(row['service_name'])}</b>\n"
+            f"🔮 نام سرویس: <b>{esc(urllib.parse.unquote(row['service_name'] or ''))}</b>\n"
             f"🧩 نوع سرویس: {esc(row['type_name'])}\n"
             f"🔋 حجم: {row['volume_gb']} گیگ\n"
             f"⏰ مدت: {row['duration_days']} روز\n\n"
@@ -2890,7 +2892,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "یافت نشد.", show_alert=True)
             return
         text = (
-            f"🔮 نام سرویس: <b>{esc(row['service_name'])}</b>\n\n"
+            f"🔮 نام سرویس: <b>{esc(urllib.parse.unquote(row['service_name'] or ''))}</b>\n\n"
             f"💝 Config:\n<code>{esc(row['config_text'])}</code>\n\n"
             f"🔋 Volume web: {esc(row['inquiry_link'] or '-')}\n"
             f"🗓 ثبت: {esc(row['created_at'])}\n"

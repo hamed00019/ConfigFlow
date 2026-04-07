@@ -2,6 +2,7 @@
 """
 Main menu screens: home, profile, support, my configs.
 """
+import urllib.parse
 from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
@@ -87,7 +88,8 @@ def show_my_configs(target, user_id):
     kb = types.InlineKeyboardMarkup()
     for item in items:
         expired_mark = " ❌" if item["is_expired"] else ""
-        title        = f"{item['service_name']}{expired_mark}"
+        svc_name     = urllib.parse.unquote(item["service_name"] or "")
+        title        = f"{svc_name}{expired_mark}"
         kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
     send_or_edit(target, "📦 <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
