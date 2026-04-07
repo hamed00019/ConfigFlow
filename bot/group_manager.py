@@ -52,9 +52,10 @@ def ensure_group_topics():
     if not group_id:
         return "⚠️ آیدی گروه تنظیم نشده است."
 
-    created = []
-    already = []
-    errors  = []
+    created    = []
+    already    = []
+    errors     = []
+    migrated   = False
 
     for key, name in TOPICS:
         if _get_topic_id(key):
@@ -65,16 +66,41 @@ def ensure_group_topics():
             setting_set(_SETTING_KEY[key], str(topic.message_thread_id))
             created.append(name)
         except Exception as e:
-            errors.append(f"{name} ({e})")
+            err_str = str(e)
+            # Auto-migrate: regular group upgraded to supergroup → ID changes to -100XXXXXXX
+            if "upgraded to a supergroup" in err_str and not migrated:
+                new_id = int(f"-100{abs(group_id)}")
+                setting_set("group_id", str(new_id))
+                group_id = new_id
+                migrated = True
+                # Retry with new ID
+                try:
+                    topic = bot.create_forum_topic(group_id, name)
+                    setting_set(_SETTING_KEY[key], str(topic.message_thread_id))
+                    created.append(name)
+                except Exception as e2:
+                    errors.append(f"{name} ({e2})")
+            elif "upgraded to a supergroup" in err_str and migrated:
+                # Already migrated, just retry
+                try:
+                    topic = bot.create_forum_topic(group_id, name)
+                    setting_set(_SETTING_KEY[key], str(topic.message_thread_id))
+                    created.append(name)
+                except Exception as e2:
+                    errors.append(f"{name} ({e2})")
+            else:
+                errors.append(f"{name} ({e})")
 
     parts = []
+    if migrated:
+        parts.append(f"🔄 آیدی گروه به سوپرگروه آپدیت شد: <code>{group_id}</code>")
     if created:
         parts.append("✅ تاپیک‌های جدید ساخته شد:\n" + "\n".join(f"  • {n}" for n in created))
     if already:
         parts.append(f"✔️ {len(already)} تاپیک از قبل موجود بود.")
     if errors:
         parts.append("❌ خطا در ساخت:\n" + "\n".join(f"  • {e}" for e in errors))
-    if not created and not errors:
+    if not created and not errors and not migrated:
         parts.append("✅ همه تاپیک‌ها موجود هستند.")
     return "\n\n".join(parts)
 
