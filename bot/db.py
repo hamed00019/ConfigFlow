@@ -13,6 +13,7 @@ def get_conn():
     c = sqlite3.connect(DB_NAME, check_same_thread=False)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys = ON")
+    c.execute("PRAGMA journal_mode = WAL")  # allow concurrent reads during writes
     return c
 
 
@@ -671,19 +672,34 @@ def get_available_configs_for_package(package_id):
 
 def reserve_first_config(package_id, payment_id=None):
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM configs WHERE package_id=? AND sold_to IS NULL "
-            "AND reserved_payment_id IS NULL AND is_expired=0 ORDER BY id ASC LIMIT 1",
-            (package_id,)
-        ).fetchone()
-        if not row:
-            return None
         if payment_id:
+            # Atomic single-statement UPDATE: find + reserve in one shot.
+            # SQLite serialises writes, so no two threads can claim the same row.
             conn.execute(
-                "UPDATE configs SET reserved_payment_id=? WHERE id=?",
-                (payment_id, row["id"])
+                "UPDATE configs SET reserved_payment_id=? "
+                "WHERE id=("
+                "  SELECT id FROM configs "
+                "  WHERE package_id=? AND sold_to IS NULL "
+                "  AND reserved_payment_id IS NULL AND is_expired=0 "
+                "  ORDER BY id ASC LIMIT 1"
+                ")",
+                (payment_id, package_id),
             )
-        return row["id"]
+            changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
+            if changed == 0:
+                return None
+            row = conn.execute(
+                "SELECT id FROM configs WHERE reserved_payment_id=? AND sold_to IS NULL",
+                (payment_id,),
+            ).fetchone()
+            return row["id"] if row else None
+        else:
+            row = conn.execute(
+                "SELECT id FROM configs WHERE package_id=? AND sold_to IS NULL "
+                "AND reserved_payment_id IS NULL AND is_expired=0 ORDER BY id ASC LIMIT 1",
+                (package_id,),
+            ).fetchone()
+            return row["id"] if row else None
 
 
 def release_reserved_config(config_id):
@@ -708,11 +724,19 @@ def assign_config_to_user(config_id, user_id, package_id, amount, payment_method
         purchase_id = conn.execute(
             "SELECT last_insert_rowid() AS x"
         ).fetchone()["x"]
-        conn.execute(
+        result = conn.execute(
             "UPDATE configs SET sold_to=?, purchase_id=?, sold_at=?, "
-            "reserved_payment_id=NULL WHERE id=?",
+            "reserved_payment_id=NULL WHERE id=? AND sold_to IS NULL",
             (user_id, purchase_id, now_str(), config_id)
         )
+        changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
+        if changed == 0:
+            # Config was already sold to someone else (concurrent approval)
+            conn.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
+            raise RuntimeError(
+                f"Config {config_id} was already assigned to another user "
+                "(concurrent payment approval detected)."
+            )
         return purchase_id
 
 
