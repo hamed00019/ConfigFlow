@@ -41,6 +41,12 @@ def main():
         except Exception as e:
             print(f"⚠️ Could not start API server: {e}")
 
+    # Remove any active webhook before starting long-polling (prevents 409 conflict)
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        print(f"⚠️ Could not delete webhook: {e}")
+
     print("✅ Bot is running...")
     bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
 
