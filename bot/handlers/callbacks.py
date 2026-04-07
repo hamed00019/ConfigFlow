@@ -3008,15 +3008,32 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "agency"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        agents = get_agencies()
+        agents    = get_agencies()
+        req_flag  = setting_get("agency_request_enabled", "1")
+        req_icon  = "🟢" if req_flag == "1" else "🔴"
+        req_label = "روشن" if req_flag == "1" else "خاموش"
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            f"{req_icon} درخواست نمایندگی — {req_label}",
+            callback_data="adm:agt:toggle"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
-        kb.add(types.InlineKeyboardButton(f"📋 لیست نمایندگان ({len(agents)})", callback_data="adm:agt:list"))
+        # Inline list: each agent on one row with remove button
+        for ag in agents:
+            name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"🤝 {name}",
+                    callback_data=f"adm:agt:u:{ag['user_id']}"),
+                types.InlineKeyboardButton(
+                    "🗑 حذف",
+                    callback_data=f"adm:agt:rm:{ag['user_id']}")
+            )
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
         send_or_edit(call,
             f"🤝 <b>مدیریت نمایندگان</b>\n\n"
-            f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>",
+            f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>\n"
+            f"📨 وضعیت درخواست: <b>{req_label}</b>",
             kb)
         return
 
@@ -3032,30 +3049,80 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:agents"))
         return
 
-    if data == "adm:agt:list":
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        agents = get_agencies()
-        bot.answer_callback_query(call.id)
-        if not agents:
-            send_or_edit(call, "📋 هیچ نماینده‌ای ثبت نشده است.", back_button("admin:agents"))
-            return
-        kb = types.InlineKeyboardMarkup()
-        for ag in agents:
-            name = ag["full_name"] or str(ag["user_id"])
-            kb.add(types.InlineKeyboardButton(
-                f"🤝 {name} | {ag['user_id']}",
-                callback_data=f"adm:agt:u:{ag['user_id']}"
-            ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:agents"))
-        send_or_edit(call, f"📋 <b>لیست نمایندگان ({len(agents)})</b>", kb)
-        return
-
     if data.startswith("adm:agt:u:"):
         target_uid = int(data.split(":")[3])
         bot.answer_callback_query(call.id)
         _show_admin_user_detail(call, target_uid)
+        return
+
+    if data.startswith("adm:agt:rm:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        target_uid = int(data.split(":")[3])
+        with get_conn() as conn:
+            conn.execute("UPDATE users SET is_agent=0 WHERE user_id=?", (target_uid,))
+        bot.answer_callback_query(call.id, "✅ کاربر از نمایندگی حذف شد.")
+        # re-render agents menu
+        agents    = get_agencies()
+        req_flag  = setting_get("agency_request_enabled", "1")
+        req_icon  = "🟢" if req_flag == "1" else "🔴"
+        req_label = "روشن" if req_flag == "1" else "خاموش"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            f"{req_icon} درخواست نمایندگی — {req_label}",
+            callback_data="adm:agt:toggle"))
+        kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
+        for ag in agents:
+            name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"🤝 {name}",
+                    callback_data=f"adm:agt:u:{ag['user_id']}"),
+                types.InlineKeyboardButton(
+                    "🗑 حذف",
+                    callback_data=f"adm:agt:rm:{ag['user_id']}")
+            )
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        send_or_edit(call,
+            f"🤝 <b>مدیریت نمایندگان</b>\n\n"
+            f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>\n"
+            f"📨 وضعیت درخواست: <b>{req_label}</b>",
+            kb)
+        return
+
+    if data == "adm:agt:toggle":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur      = setting_get("agency_request_enabled", "1")
+        new      = "0" if cur == "1" else "1"
+        setting_set("agency_request_enabled", new)
+        req_icon  = "🟢" if new == "1" else "🔴"
+        req_label = "روشن" if new == "1" else "خاموش"
+        bot.answer_callback_query(call.id, f"درخواست نمایندگی: {req_label}")
+        agents = get_agencies()
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            f"{req_icon} درخواست نمایندگی — {req_label}",
+            callback_data="adm:agt:toggle"))
+        kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
+        for ag in agents:
+            name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"🤝 {name}",
+                    callback_data=f"adm:agt:u:{ag['user_id']}"),
+                types.InlineKeyboardButton(
+                    "🗑 حذف",
+                    callback_data=f"adm:agt:rm:{ag['user_id']}")
+            )
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        send_or_edit(call,
+            f"🤝 <b>مدیریت نمایندگان</b>\n\n"
+            f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>\n"
+            f"📨 وضعیت درخواست: <b>{req_label}</b>",
+            kb)
         return
 
     # ── Agency price config (3-mode) ──────────────────────────────────────────
