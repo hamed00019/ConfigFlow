@@ -42,7 +42,7 @@ def init_db():
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 type_id       INTEGER NOT NULL,
                 name          TEXT    NOT NULL,
-                volume_gb     INTEGER NOT NULL,
+                volume_gb     REAL    NOT NULL,
                 duration_days INTEGER NOT NULL,
                 price         INTEGER NOT NULL,
                 active        INTEGER NOT NULL DEFAULT 1,
