@@ -314,10 +314,47 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
             if payment["config_id"] != config_id:
                 with get_conn() as conn:
                     conn.execute("UPDATE payments SET config_id=? WHERE id=?", (config_id, payment_id))
-            purchase_id = assign_config_to_user(
-                config_id, user_id, package_id, payment["amount"],
-                payment["payment_method"], is_test=0
-            )
+            try:
+                purchase_id = assign_config_to_user(
+                    config_id, user_id, package_id, payment["amount"],
+                    payment["payment_method"], is_test=0
+                )
+            except RuntimeError as e:
+                # Concurrent approval: this config was just sold to someone else.
+                # Re-reserve and try next available config.
+                from .config import ADMIN_IDS as _AIDS
+                for _aid in _AIDS:
+                    try:
+                        bot.send_message(
+                            _aid,
+                            f"⚠️ <b>تداخل تأیید همزمان</b>\n\n"
+                            f"کانفیگ #{config_id} قبلاً به کاربر دیگری اختصاص داده شده بود.\n"
+                            f"پرداخت #{payment_id} (کاربر {user_id}) به pending order تبدیل شد.\n\n"
+                            f"<code>{e}</code>",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+                pending_id = create_pending_order(
+                    user_id, package_id, payment_id, payment["amount"], payment["payment_method"]
+                )
+                complete_payment(payment_id)
+                bot.send_message(
+                    user_id,
+                    "✅ پرداخت شما تأیید شد.\n\n"
+                    "⚠️ <b>به دلیل ترافیک بالا، کانفیگ انتخابی موجود نبود.</b>\n"
+                    "درخواست شما ثبت شد و به زودی کانفیگ تحویل داده می‌شود.\n"
+                    "🙏 از صبر شما متشکریم."
+                )
+                notify_pending_order_to_admins(
+                    pending_id, user_id,
+                    package_row if package_row else {
+                        "type_name": "-", "name": "-",
+                        "volume_gb": "-", "duration_days": "-", "price": payment["amount"]
+                    },
+                    payment["amount"], payment["payment_method"]
+                )
+                return True
             complete_payment(payment_id)
             bot.send_message(user_id, f"✅ واریزی شما تأیید شد.\n\n{esc(admin_note)}")
             deliver_purchase_message(user_id, purchase_id)
