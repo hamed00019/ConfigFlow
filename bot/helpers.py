@@ -64,13 +64,13 @@ def fmt_price(a):
 
 
 def fmt_vol(gb):
-    """Return 'نامحدود' if gb == 0, else '{gb} گیگ'."""
-    return "نامحدود" if int(gb) == 0 else f"{gb} گیگ"
+    """Return 'حجم نامحدود' if gb == 0, else '{gb} گیگ'."""
+    return "حجم نامحدود" if int(gb) == 0 else f"{gb} گیگ"
 
 
 def fmt_dur(days):
-    """Return 'نامحدود' if days == 0, else '{days} روز'."""
-    return "نامحدود" if int(days) == 0 else f"{days} روز"
+    """Return 'زمان نامحدود' if days == 0, else '{days} روز'."""
+    return "زمان نامحدود" if int(days) == 0 else f"{days} روز"
 
 
 def display_name(u):
