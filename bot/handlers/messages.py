@@ -685,6 +685,16 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API TronPays ذخیره شد.", reply_markup=back_button("adm:set:gw:tronpays_rial"))
             return
 
+        if sn == "admin_set_tronpays_rial_cb_url" and is_admin(uid):
+            val = (message.text or "").strip()
+            if val and not (val.startswith("http://") or val.startswith("https://")):
+                bot.send_message(uid, "⚠️ URL باید با <code>https://</code> یا <code>http://</code> شروع شود:", reply_markup=back_button("adm:set:gw:tronpays_rial"))
+                return
+            setting_set("tronpays_rial_callback_url", val)
+            state_clear(uid)
+            bot.send_message(uid, f"✅ Callback URL ذخیره شد:\n<code>{val or 'https://example.com/'}</code>", reply_markup=back_button("adm:set:gw:tronpays_rial"))
+            return
+
         if sn == "admin_gw_range_min" and is_admin(uid):
             gw = sd.get("gw", "")
             val = (message.text or "").strip()

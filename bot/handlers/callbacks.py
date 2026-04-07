@@ -1049,7 +1049,12 @@ def _dispatch_callback(call, uid, data):
         success, result = create_tronpays_rial_invoice(price, hash_id, f"تمدید {package_row['name']}")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"خطا: {err_msg[:100]}", show_alert=True)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه TronPays</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                back_button(f"renew:{purchase_id}"))
             return
         invoice_id = result  # plain string returned by TronPays
         payment_id = create_payment("renewal", uid, package_id, price, "tronpays_rial", status="pending",
@@ -1591,7 +1596,12 @@ def _dispatch_callback(call, uid, data):
         success, result = create_tronpays_rial_invoice(price, hash_id, f"خرید {package_row['name']}")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"خطا: {err_msg[:100]}", show_alert=True)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه TronPays</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                back_button(f"buy:p:{package_id}"))
             return
         invoice_id = result  # plain string returned by TronPays
         payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial", status="pending")
@@ -1833,7 +1843,12 @@ def _dispatch_callback(call, uid, data):
         success, result = create_tronpays_rial_invoice(amount, order_id, "شارژ کیف پول")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id, f"خطا: {err_msg[:100]}", show_alert=True)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه TronPays</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                back_button("wallet:charge"))
             return
         invoice_id = result
         payment_id = create_payment("wallet_charge", uid, None, amount, "tronpays_rial", status="pending")
@@ -4416,16 +4431,19 @@ def _dispatch_callback(call, uid, data):
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:tronpays_rial:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tronpays_rial_key"))
+        kb.add(types.InlineKeyboardButton("🔗 تنظیم Callback URL", callback_data="adm:set:tronpays_rial_cb_url"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🤖 دریافت API Key از @TronPaysBot", url="https://t.me/TronPaysBot"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b> — ابتدا از ربات @TronPaysBot کلید API دریافت کنید")
+        cb_url = setting_get("tronpays_rial_callback_url", "").strip() or "https://example.com/"
         text = (
             "💳 <b>درگاه پرداخت ریالی (TronPays)</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n\n"
-            f"🔑 کلید API: {key_display}\n\n"
+            f"🔑 کلید API: {key_display}\n"
+            f"🔗 Callback URL: <code>{esc(cb_url)}</code>\n\n"
             "📋 <b>راهنمای دریافت API Key:</b>\n"
             "۱. ربات @TronPaysBot را استارت کنید\n"
             "۲. ثبت‌نام و احراز هویت را تکمیل کنید\n"
@@ -4453,6 +4471,16 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_set_tronpays_rial_key")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔑 کلید API TronPays را ارسال کنید:", back_button("adm:set:gw:tronpays_rial"))
+        return
+
+    if data == "adm:set:tronpays_rial_cb_url":
+        state_set(uid, "admin_set_tronpays_rial_cb_url")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔗 <b>Callback URL درگاه TronPays</b>\n\n"
+            "یک URL معتبر ارسال کنید (مثلاً آدرس سایت یا وبهوک شما).\n"
+            "اگر ندارید، <code>https://example.com/</code> را بفرستید.",
+            back_button("adm:set:gw:tronpays_rial"))
         return
 
     _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays"}

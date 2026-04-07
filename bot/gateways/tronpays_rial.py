@@ -12,11 +12,12 @@ from ..db import setting_get
 TRONPAYS_RIAL_BASE_URL = "https://api.tronpays.online"
 
 
-def create_tronpays_rial_invoice(amount_toman, hash_id, callback_url="https://example.com/"):
+def create_tronpays_rial_invoice(amount_toman, hash_id, description=""):
     """Create a TronPays invoice. Returns (success, pay_url_or_error)."""
     api_key = setting_get("tronpays_rial_api_key", "").strip()
     if not api_key:
         return False, {"error": "کلید API تران‌پیز ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها اقدام کنید."}
+    callback_url = setting_get("tronpays_rial_callback_url", "").strip() or "https://example.com/"
     payload = json.dumps({
         "api_key":      api_key,
         "hash_id":      hash_id,
@@ -27,7 +28,11 @@ def create_tronpays_rial_invoice(amount_toman, hash_id, callback_url="https://ex
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "ConfigFlow/1.0"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+            "User-Agent":   "ConfigFlow/1.0",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -63,7 +68,11 @@ def check_tronpays_rial_invoice(invoice_id):
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "ConfigFlow/1.0"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+            "User-Agent":   "ConfigFlow/1.0",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
