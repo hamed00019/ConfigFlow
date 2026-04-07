@@ -3871,7 +3871,8 @@ def _dispatch_callback(call, uid, data):
         setting_set(f"notif_own_{key}", new)
         label_map = dict(_NOTIF_TYPES)
         lbl = label_map.get(key, key)
-        bot.answer_callback_query(call.id, f"{'\u0641\u0639\u0627\u0644' if new=='1' else '\u063a\u06cc\u0631\u0641\u0639\u0627\u0644'} شد: {lbl}")
+        status_lbl = "فعال" if new == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"{status_lbl} شد: {lbl}")
         kb = types.InlineKeyboardMarkup()
         for k, l in _NOTIF_TYPES:
             on = setting_get(f"notif_own_{k}", "1") == "1"
@@ -3937,7 +3938,8 @@ def _dispatch_callback(call, uid, data):
         setting_set(f"notif_grp_{key}", new)
         label_map = dict(_NOTIF_TYPES)
         lbl = label_map.get(key, key)
-        bot.answer_callback_query(call.id, f"{'فعال' if new=='1' else 'غیرفعال'} شد: {lbl}")
+        status_lbl = "فعال" if new == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"{status_lbl} شد: {lbl}")
         # re-render group list
         kb = types.InlineKeyboardMarkup()
         for k, l in _NOTIF_TYPES:
@@ -3964,7 +3966,8 @@ def _dispatch_callback(call, uid, data):
         setting_set(f"notif_bot_{key}", new)
         label_map = dict(_NOTIF_TYPES)
         lbl = label_map.get(key, key)
-        bot.answer_callback_query(call.id, f"{'فعال' if new=='1' else 'غیرفعال'} شد: {lbl}")
+        status_lbl = "فعال" if new == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"{status_lbl} شد: {lbl}")
         # re-render bot list
         kb = types.InlineKeyboardMarkup()
         for k, l in _NOTIF_TYPES:
