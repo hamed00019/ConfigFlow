@@ -2257,7 +2257,7 @@ def _dispatch_callback(call, uid, data):
             s = state_data(uid)
             state_set(uid, "admin_bulk_suffix",
                       package_id=s["package_id"], type_id=s["type_id"],
-                      has_inquiry=s["has_inquiry"], count=s["count"], prefix="")
+                      has_inquiry=s["has_inquiry"], prefix="")
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
@@ -2280,16 +2280,16 @@ def _dispatch_callback(call, uid, data):
             pkg_id = int(rest.split(":")[1])
             s = state_data(uid)
             has_inq = s.get("has_inquiry", False)
-            count = s.get("count", 0)
             prefix = s.get("prefix", "")
             state_set(uid, "admin_bulk_data",
                       package_id=s["package_id"], type_id=s["type_id"],
-                      has_inquiry=has_inq, count=count, prefix=prefix, suffix="")
+                      has_inquiry=has_inq, prefix=prefix, suffix="")
             bot.answer_callback_query(call.id)
             if has_inq:
                 fmt_text = (
                     "📋 <b>ارسال کانفیگ‌ها</b>\n\n"
-                    f"تعداد: <b>{count}</b> کانفیگ\n\n"
+                    "کانفیگ‌ها را ارسال کنید. دو روش وجود دارد:\n\n"
+                    "<b>📝 روش اول: ارسال متنی</b>\n"
                     "هر کانفیگ <b>دو خط</b> دارد:\n"
                     "خط اول: لینک کانفیگ\n"
                     "خط دوم: لینک استعلام (شروع با http)\n\n"
@@ -2297,16 +2297,25 @@ def _dispatch_callback(call, uid, data):
                     "<code>vless://abc...#name1\n"
                     "http://panel.com/sub/1\n"
                     "vless://def...#name2\n"
-                    "http://panel.com/sub/2</code>"
+                    "http://panel.com/sub/2</code>\n\n"
+                    "<b>📎 روش دوم: ارسال فایل TXT</b>\n"
+                    "اگر تعداد کانفیگ‌هایتان زیاد است (بیش از ۱۰-۱۵ عدد)، "
+                    "یک فایل <b>.txt</b> بسازید و تمام لینک‌ها را در آن قرار دهید "
+                    "(هر خط یک کانفیگ + خط بعدی لینک استعلام)، سپس فایل را ارسال کنید."
                 )
             else:
                 fmt_text = (
                     "📋 <b>ارسال کانفیگ‌ها</b>\n\n"
-                    f"تعداد: <b>{count}</b> کانفیگ\n\n"
+                    "کانفیگ‌ها را ارسال کنید. دو روش وجود دارد:\n\n"
+                    "<b>📝 روش اول: ارسال متنی</b>\n"
                     "هر خط یک لینک کانفیگ:\n\n"
                     "💡 مثال:\n"
                     "<code>vless://abc...#name1\n"
-                    "vless://def...#name2</code>"
+                    "vless://def...#name2</code>\n\n"
+                    "<b>📎 روش دوم: ارسال فایل TXT</b>\n"
+                    "اگر تعداد کانفیگ‌هایتان زیاد است (بیش از ۱۰-۱۵ عدد)، "
+                    "یک فایل <b>.txt</b> بسازید و تمام لینک کانفیگ‌ها را در آن قرار دهید "
+                    "(هر خط یک کانفیگ)، سپس فایل را ارسال کنید."
                 )
             send_or_edit(call, fmt_text, back_button("admin:add_config"))
             return
@@ -2317,11 +2326,20 @@ def _dispatch_callback(call, uid, data):
             yn = sub_parts[1]
             pkg_id = int(sub_parts[2])
             has_inq = (yn == "y")
-            state_set(uid, "admin_bulk_count",
+            state_set(uid, "admin_bulk_prefix",
                       package_id=pkg_id, type_id=state_data(uid).get("type_id", 0),
                       has_inquiry=has_inq)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ بعدی (بدون پیشوند)", callback_data=f"adm:cfg:bulk:skippre:{pkg_id}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
             bot.answer_callback_query(call.id)
-            send_or_edit(call, "🔢 تعداد کانفیگ‌ها را وارد کنید:", back_button("admin:add_config"))
+            send_or_edit(call,
+                "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
+                "زمانی که کانفیگ را در پنل می‌سازید، اگر اینباند <b>ریمارک (Remark)</b> دارد، "
+                "ابتدای نام کانفیگ اضافه می‌شود.\n"
+                "اگر نمی‌خواهید آن در نام کانفیگ بیاید، پیشوند را اینجا وارد کنید.\n\n"
+                "💡 مثال: <code>%E2%9A%95%EF%B8%8FTUN_-</code>\n"
+                "یا: <code>⚕️TUN_-</code>", kb)
             return
 
         # Initial: ask about inquiry links
@@ -2571,7 +2589,7 @@ def _dispatch_callback(call, uid, data):
             f"🔋 حجم: {fmt_vol(row['volume_gb'])}\n"
             f"⏰ مدت: {fmt_dur(row['duration_days'])}\n\n"
             f"💝 Config:\n<code>{esc(row['config_text'])}</code>\n\n"
-            f"🔋 Volume web: {esc(row['inquiry_link'] or '-')}\n"
+            f"🔋 Subscription: {esc(row['inquiry_link'] or '-')}\n"
             f"🗓 ثبت: {esc(row['created_at'])}"
         )
         kb = types.InlineKeyboardMarkup()

@@ -502,34 +502,12 @@ def universal_handler(message):
             bot.send_message(uid, "⚠️ لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_admin_panel())
             return
 
-        if sn == "admin_bulk_count" and is_admin(uid):
-            count = parse_int(message.text or "")
-            if not count or count <= 0:
-                bot.send_message(uid, "⚠️ تعداد معتبر وارد کنید.", reply_markup=back_button("admin:add_config"))
-                return
-            pkg_id = sd["package_id"]
-            state_set(uid, "admin_bulk_prefix",
-                      package_id=sd["package_id"], type_id=sd["type_id"],
-                      has_inquiry=sd["has_inquiry"], count=count)
-            kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("⏭ بعدی (بدون پیشوند)", callback_data=f"adm:cfg:bulk:skippre:{pkg_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
-            bot.send_message(uid,
-                "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
-                "زمانی که کانفیگ را در پنل می‌سازید، اگر اینباند <b>ریمارک (Remark)</b> دارد، "
-                "ابتدای نام کانفیگ اضافه می‌شود.\n"
-                "اگر نمی‌خواهید آن در نام کانفیگ بیاید، پیشوند را اینجا وارد کنید.\n\n"
-                "💡 مثال: <code>%E2%9A%95%EF%B8%8FTUN_-</code>\n"
-                "یا: <code>⚕️TUN_-</code>",
-                reply_markup=kb)
-            return
-
         if sn == "admin_bulk_prefix" and is_admin(uid):
             prefix = (message.text or "").strip()
             pkg_id = sd["package_id"]
             state_set(uid, "admin_bulk_suffix",
                       package_id=sd["package_id"], type_id=sd["type_id"],
-                      has_inquiry=sd["has_inquiry"], count=sd["count"], prefix=prefix)
+                      has_inquiry=sd["has_inquiry"], prefix=prefix)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بعدی (بدون پسوند)", callback_data=f"adm:cfg:bulk:skipsuf:{pkg_id}"))
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
@@ -544,15 +522,15 @@ def universal_handler(message):
         if sn == "admin_bulk_suffix" and is_admin(uid):
             suffix = (message.text or "").strip()
             has_inq = sd.get("has_inquiry", False)
-            count = sd.get("count", 0)
             prefix = sd.get("prefix", "")
             state_set(uid, "admin_bulk_data",
                       package_id=sd["package_id"], type_id=sd["type_id"],
-                      has_inquiry=has_inq, count=count, prefix=prefix, suffix=suffix)
+                      has_inquiry=has_inq, prefix=prefix, suffix=suffix)
             if has_inq:
                 fmt_text = (
                     "📋 <b>ارسال کانفیگ‌ها</b>\n\n"
-                    f"تعداد: <b>{count}</b> کانفیگ\n\n"
+                    "کانفیگ‌ها را ارسال کنید. دو روش وجود دارد:\n\n"
+                    "<b>📝 روش اول: ارسال متنی</b>\n"
                     "هر کانفیگ <b>دو خط</b> دارد:\n"
                     "خط اول: لینک کانفیگ\n"
                     "خط دوم: لینک استعلام (شروع با http)\n\n"
@@ -560,28 +538,56 @@ def universal_handler(message):
                     "<code>vless://abc...#name1\n"
                     "http://panel.com/sub/1\n"
                     "vless://def...#name2\n"
-                    "http://panel.com/sub/2</code>"
+                    "http://panel.com/sub/2</code>\n\n"
+                    "<b>📎 روش دوم: ارسال فایل TXT</b>\n"
+                    "اگر تعداد کانفیگ‌هایتان زیاد است (بیش از ۱۰-۱۵ عدد)، "
+                    "یک فایل <b>.txt</b> بسازید و تمام لینک‌ها را در آن قرار دهید "
+                    "(هر خط یک کانفیگ + خط بعدی لینک استعلام)، سپس فایل را ارسال کنید."
                 )
             else:
                 fmt_text = (
                     "📋 <b>ارسال کانفیگ‌ها</b>\n\n"
-                    f"تعداد: <b>{count}</b> کانفیگ\n\n"
+                    "کانفیگ‌ها را ارسال کنید. دو روش وجود دارد:\n\n"
+                    "<b>📝 روش اول: ارسال متنی</b>\n"
                     "هر خط یک لینک کانفیگ:\n\n"
                     "💡 مثال:\n"
                     "<code>vless://abc...#name1\n"
-                    "vless://def...#name2</code>"
+                    "vless://def...#name2</code>\n\n"
+                    "<b>📎 روش دوم: ارسال فایل TXT</b>\n"
+                    "اگر تعداد کانفیگ‌هایتان زیاد است (بیش از ۱۰-۱۵ عدد)، "
+                    "یک فایل <b>.txt</b> بسازید و تمام لینک کانفیگ‌ها را در آن قرار دهید "
+                    "(هر خط یک کانفیگ)، سپس فایل را ارسال کنید."
                 )
             bot.send_message(uid, fmt_text, reply_markup=back_button("admin:add_config"))
             return
 
         if sn == "admin_bulk_data" and is_admin(uid):
-            raw = (message.text or "").strip()
+            # ── Extract raw text from message or TXT file ──
+            raw = ""
+            if message.document:
+                # User sent a file — only accept .txt
+                doc = message.document
+                fname = (doc.file_name or "").lower()
+                if not fname.endswith(".txt"):
+                    bot.send_message(uid, "⚠️ فقط فایل با فرمت <b>.txt</b> پشتیبانی می‌شود.", parse_mode="HTML",
+                                     reply_markup=back_button("admin:add_config"))
+                    return
+                try:
+                    file_info = bot.get_file(doc.file_id)
+                    downloaded = bot.download_file(file_info.file_path)
+                    raw = downloaded.decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    bot.send_message(uid, "⚠️ خطا در دانلود فایل. لطفاً دوباره ارسال کنید.",
+                                     reply_markup=back_button("admin:add_config"))
+                    return
+            else:
+                raw = (message.text or "").strip()
+
             if not raw:
                 bot.send_message(uid, "⚠️ متنی ارسال نشده.", reply_markup=back_button("admin:add_config"))
                 return
             lines = [l.strip() for l in raw.splitlines() if l.strip()]
             has_inq = sd.get("has_inquiry", False)
-            expected = sd.get("count", 0)
             prefix = sd.get("prefix", "")
             suffix = sd.get("suffix", "")
             type_id = sd["type_id"]
@@ -601,6 +607,7 @@ def universal_handler(message):
                     configs.append((line, ""))
 
             success_count = 0
+            success_names = []
             errors = []
             for idx, (cfg_text, inq_link) in enumerate(configs, 1):
                 # Extract name from after #
@@ -643,6 +650,7 @@ def universal_handler(message):
                 try:
                     add_config(type_id, package_id, svc_name, cfg_text, inq_link)
                     success_count += 1
+                    success_names.append(svc_name)
                 except Exception as e:
                     errors.append(f"کانفیگ {idx}: {str(e)}")
 
@@ -656,13 +664,14 @@ def universal_handler(message):
                     auto_fulfill_err = str(e)
 
             state_clear(uid)
-            result = f"✅ <b>{success_count}</b> کانفیگ از <b>{expected}</b> با موفقیت ثبت شد."
+            result = f"✅ <b>{success_count}</b> کانفیگ با موفقیت ثبت شد."
+            if success_names:
+                names_text = "\n".join(f"  • {esc(n)}" for n in success_names)
+                result += f"\n\n📝 <b>نام کانفیگ‌های ثبت‌شده:</b>\n{names_text}"
             if auto_fulfilled > 0:
                 result += f"\n\n🚀 <b>{auto_fulfilled}</b> سفارش در انتظار به صورت خودکار تحویل داده شد."
             if auto_fulfill_err:
                 result += f"\n\n⚠️ خطا در تحویل سفارش‌های در انتظار:\n<code>{esc(auto_fulfill_err)}</code>"
-            if len(configs) != expected:
-                result += f"\n\n⚠️ تعداد ارسال‌شده ({len(configs)}) با تعداد مورد انتظار ({expected}) متفاوت است."
             if errors:
                 result += "\n\n❌ خطاها:\n" + "\n".join(errors[:20])
             bot.send_message(uid, result, reply_markup=kb_admin_panel())
