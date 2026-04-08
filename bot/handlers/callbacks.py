@@ -903,11 +903,12 @@ def _dispatch_callback(call, uid, data):
             _swapwallet_error_inline(call, err_msg)
             return
         invoice_id    = result.get("id", "")
+        sw_order_id   = result.get("_order_id", order_id)
         payment_links = result.get("paymentLinks", [])
         payment_id = create_payment("renewal", uid, package_id, price, "swapwallet", status="pending",
                                      config_id=item["config_id"])
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (sw_order_id, payment_id))
         state_set(uid, "await_renewal_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id,
                   purchase_id=purchase_id)
         show_swapwallet_page(call, amount_toman=price, invoice_id=invoice_id,
@@ -1443,10 +1444,11 @@ def _dispatch_callback(call, uid, data):
             _swapwallet_error_inline(call, err_msg)
             return
         invoice_id    = result.get("id", "")
+        sw_order_id   = result.get("_order_id", order_id)
         payment_links = result.get("paymentLinks", [])
         payment_id = create_payment("config_purchase", uid, package_id, price, "swapwallet", status="pending")
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (sw_order_id, payment_id))
         state_set(uid, "await_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id)
         show_swapwallet_page(call, amount_toman=price, invoice_id=invoice_id,
                              payment_links=payment_links, payment_id=payment_id,
@@ -1818,10 +1820,11 @@ def _dispatch_callback(call, uid, data):
             _swapwallet_error_inline(call, err_msg)
             return
         invoice_id    = result.get("id", "")
+        sw_order_id   = result.get("_order_id", order_id)
         payment_links = result.get("paymentLinks", [])
         payment_id = create_payment("wallet_charge", uid, None, amount, "swapwallet", status="pending")
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (sw_order_id, payment_id))
         state_set(uid, "await_swapwallet_verify", payment_id=payment_id, invoice_id=invoice_id)
         show_swapwallet_page(call, amount_toman=amount, invoice_id=invoice_id,
                              payment_links=payment_links, payment_id=payment_id,

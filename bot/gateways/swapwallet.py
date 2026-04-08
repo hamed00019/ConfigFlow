@@ -44,8 +44,9 @@ def create_swapwallet_invoice(amount_toman, order_id, description="پرداخت"
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read().decode("utf-8"))
         if result.get("id"):
+            result["_order_id"] = str(order_id)
             return True, result
-        return False, {"error": str(result)}
+        return False, {"error": str(result)[:300]}
     except urllib.error.HTTPError as e:
         try:
             err_data = json.loads(e.read().decode("utf-8"))
@@ -57,7 +58,7 @@ def create_swapwallet_invoice(amount_toman, order_id, description="پرداخت"
         return False, {"error": str(e)}
 
 
-def check_swapwallet_invoice(invoice_id):
+def check_swapwallet_invoice(order_id):
     api_key  = setting_get("swapwallet_api_key", "").strip()
     username = setting_get("swapwallet_username", "").strip()
     if api_key.lower().startswith("bearer "):
@@ -66,20 +67,23 @@ def check_swapwallet_invoice(invoice_id):
         username = username[1:].strip()
     if not username:
         return False, {"error": "نام کاربری فروشگاه سواپ ولت تنظیم نشده است."}
-    safe_user = urllib.parse.quote(username, safe="")
-    safe_inv  = urllib.parse.quote(str(invoice_id), safe="")
-    url = f"{SWAPWALLET_BASE_URL}/v1/payment/{safe_user}/resid/{safe_inv}"
+    if not api_key:
+        return False, {"error": "کلید API سواپ ولت تنظیم نشده است."}
+    safe_user  = urllib.parse.quote(username, safe="")
+    safe_order = urllib.parse.quote(str(order_id), safe="")
+    url = f"{SWAPWALLET_BASE_URL}/v2/payment/{safe_user}/invoices/with-order-id/{safe_order}"
     headers = {
-        "User-Agent": "ConfigFlow/1.0",
-        "Accept":     "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent":    "ConfigFlow/1.0",
+        "Accept":        "application/json",
     }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        return True, result
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("status") == "OK":
+            return True, data.get("result", data)
+        return False, {"error": str(data)[:300]}
     except urllib.error.HTTPError as e:
         try:
             err_data = json.loads(e.read().decode("utf-8"))

@@ -266,6 +266,8 @@ def init_db():
             "ALTER TABLE config_types ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE panel_packages ADD COLUMN inbound_id INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE config_types ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            "CREATE TABLE IF NOT EXISTS pinned_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS pinned_message_sends (id INTEGER PRIMARY KEY AUTOINCREMENT, pin_id INTEGER NOT NULL, user_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
         ]
         for sql in migrations:
             try:
