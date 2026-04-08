@@ -60,6 +60,18 @@ def universal_handler(message):
     uid    = message.from_user.id
     ensure_user(message.from_user)
 
+    # Restricted user check
+    _u = get_user(uid)
+    if _u and _u["status"] == "restricted" and not is_admin(uid):
+        bot.send_message(
+            message.chat.id,
+            "🚫 <b>دسترسی محدود شده</b>\n\n"
+            "شما از ربات محدود شده‌اید و نمی‌توانید از آن استفاده کنید.\n"
+            "در صورت نیاز با پشتیبانی تماس بگیرید.",
+            parse_mode="HTML"
+        )
+        return
+
     # Channel check
     if not check_channel_membership(uid):
         channel_lock_message(message)

@@ -124,27 +124,30 @@ def _show_perm_selection(call, uid, target_id, perms, edit_mode=False):
 def _show_admin_users_list(call, page=0, filter_mode="all"):
     from ..db import get_users, count_all_users
     PER_PAGE = 12
-    # Map filter_mode to has_purchase arg
+    # Map filter_mode to has_purchase arg and status filter
     hp = None
+    status_filter = None
     if filter_mode == "buyers":
         hp = True
     elif filter_mode == "new":
         hp = False
+    elif filter_mode in ("safe", "unsafe", "restricted"):
+        status_filter = filter_mode
 
     # DB-level pagination — no Python re-sort, newest users first
     # We need total for this filter to build pages
-    all_count_q_rows = get_users(has_purchase=hp)
+    all_count_q_rows = get_users(has_purchase=hp, status=status_filter)
     total_filtered   = len(all_count_q_rows)
     total_pages      = max(1, (total_filtered + PER_PAGE - 1) // PER_PAGE)
     page             = max(0, min(page, total_pages - 1))
-    page_rows        = get_users(has_purchase=hp, limit=PER_PAGE, offset=page * PER_PAGE)
+    page_rows        = get_users(has_purchase=hp, status=status_filter, limit=PER_PAGE, offset=page * PER_PAGE)
 
     total, buyers, new_today = count_users_stats()
 
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("🔍 جستجوی کاربر", callback_data="adm:usr:search"))
 
-    # Filter bar
+    # Filter bar — row 1: general
     all_icon    = "▶️ " if filter_mode == "all"    else ""
     buyers_icon = "▶️ " if filter_mode == "buyers" else ""
     new_icon    = "▶️ " if filter_mode == "new"    else ""
@@ -154,8 +157,23 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
         types.InlineKeyboardButton(f"{new_icon}بدون خرید",              callback_data="adm:usr:fl:new:0"),
     )
 
+    # Filter bar — row 2: security status
+    safe_icon       = "▶️ " if filter_mode == "safe"       else ""
+    unsafe_icon     = "▶️ " if filter_mode == "unsafe"     else ""
+    restricted_icon = "▶️ " if filter_mode == "restricted" else ""
+    kb.row(
+        types.InlineKeyboardButton(f"{safe_icon}🔘 امن",         callback_data="adm:usr:fl:safe:0"),
+        types.InlineKeyboardButton(f"{unsafe_icon}⚠️ ناامن",     callback_data="adm:usr:fl:unsafe:0"),
+        types.InlineKeyboardButton(f"{restricted_icon}🚫 محدود", callback_data="adm:usr:fl:restricted:0"),
+    )
+
     for row in page_rows:
-        status_icon = "🔘" if row["status"] == "safe" else "⚠️"
+        if row["status"] == "safe":
+            status_icon = "🔘"
+        elif row["status"] == "restricted":
+            status_icon = "🚫"
+        else:
+            status_icon = "⚠️"
         agent_icon  = "🤝" if row["is_agent"] else ""
         buy_icon    = f" 🛍{row['purchase_count']}" if row["purchase_count"] else ""
         name_part   = row["full_name"] or f"بدون نام ({row['user_id']})"
@@ -183,12 +201,21 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
     send_or_edit(call, text, kb)
 
 
+def _user_status_label(status):
+    if status == "safe":
+        return "🔘 امن"
+    elif status == "restricted":
+        return "🚫 محدود"
+    else:
+        return "⚠️ ناامن"
+
+
 def _show_admin_user_detail(call, user_id):
     row = get_user_detail(user_id)
     if not row:
         send_or_edit(call, "کاربر یافت نشد.", back_button("admin:users"))
         return
-    status_label = "🔘 امن" if row["status"] == "safe" else "⚠️ ناامن"
+    status_label = _user_status_label(row["status"])
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
     text = (
         "👤 <b>اطلاعات کاربر</b>\n\n"
@@ -205,8 +232,8 @@ def _show_admin_user_detail(call, user_id):
     uid_t = row["user_id"]
     kb    = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton(f"🔄 {status_label}",    callback_data=f"adm:usr:sts:{uid_t}"),
-        types.InlineKeyboardButton(f"🤝 نمایندگی",          callback_data=f"adm:usr:ag:{uid_t}"),
+        types.InlineKeyboardButton(f"🔄 {status_label}", callback_data=f"adm:usr:sts:{uid_t}"),
+        types.InlineKeyboardButton(f"🤝 نمایندگی",       callback_data=f"adm:usr:ag:{uid_t}"),
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
@@ -221,7 +248,7 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     if not row:
         bot.send_message(chat_id, "کاربر یافت نشد.", reply_markup=back_button("admin:users"))
         return
-    status_label = "🔘 امن" if row["status"] == "safe" else "⚠️ ناامن"
+    status_label = _user_status_label(row["status"])
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
     text = (
         "👤 <b>اطلاعات کاربر</b>\n\n"
@@ -238,8 +265,8 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     uid_t = row["user_id"]
     kb    = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton(f"🔄 {status_label}",    callback_data=f"adm:usr:sts:{uid_t}"),
-        types.InlineKeyboardButton(f"🤝 نمایندگی",          callback_data=f"adm:usr:ag:{uid_t}"),
+        types.InlineKeyboardButton(f"🔄 {status_label}", callback_data=f"adm:usr:sts:{uid_t}"),
+        types.InlineKeyboardButton(f"🤝 نمایندگی",       callback_data=f"adm:usr:ag:{uid_t}"),
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))

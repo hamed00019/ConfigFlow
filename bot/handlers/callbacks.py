@@ -231,6 +231,17 @@ def on_callback(call):
         channel_lock_message(call)
         return
 
+    # Restricted user check (admins bypass)
+    if not is_admin(uid):
+        _u = get_user(uid)
+        if _u and _u["status"] == "restricted":
+            bot.answer_callback_query(
+                call.id,
+                "🚫 شما از ربات محدود شده‌اید و نمی‌توانید از آن استفاده کنید.",
+                show_alert=True
+            )
+            return
+
     try:
         _dispatch_callback(call, uid, data)
     except Exception as e:
@@ -3283,11 +3294,19 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             return
 
-        if sub == "sts":  # toggle status
+        if sub == "sts":  # cycle status: safe → unsafe → restricted → safe
             user = get_user(target_id)
-            new_status = "unsafe" if user["status"] == "safe" else "safe"
+            current = user["status"] if user else "safe"
+            if current == "safe":
+                new_status = "unsafe"
+                label = "ناامن"
+            elif current == "unsafe":
+                new_status = "restricted"
+                label = "محدود"
+            else:
+                new_status = "safe"
+                label = "امن"
             set_user_status(target_id, new_status)
-            label = "ناامن" if new_status == "unsafe" else "امن"
             bot.answer_callback_query(call.id, f"وضعیت کاربر به {label} تغییر کرد.")
             _show_admin_user_detail(call, target_id)
             return

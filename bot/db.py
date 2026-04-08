@@ -362,21 +362,25 @@ def notify_first_start_if_needed(tg_user):
     _send_to_topic("new_users", text)
 
 
-def get_users(has_purchase=None, limit=None, offset=0):
+def get_users(has_purchase=None, limit=None, offset=0, status=None):
     q = (
         "SELECT u.*, "
         "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count "
         "FROM users u WHERE 1=1"
     )
+    params = []
     if has_purchase is True:
         q += " AND EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
     elif has_purchase is False:
         q += " AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+    if status is not None:
+        q += " AND u.status=?"
+        params.append(status)
     q += " ORDER BY u.user_id DESC"
     if limit is not None:
         q += f" LIMIT {int(limit)} OFFSET {int(offset)}"
     with get_conn() as conn:
-        return conn.execute(q).fetchall()
+        return conn.execute(q, params).fetchall()
 
 
 def get_user_detail(user_id):
