@@ -21,6 +21,8 @@ def create_swapwallet_invoice(amount_toman, order_id, description="پرداخت"
         api_key = api_key[7:].strip()
     if username.startswith("@"):
         username = username[1:].strip()
+    if not api_key:
+        return False, {"error": "کلید API سواپ ولت تنظیم نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها اقدام کنید."}
     if not username:
         return False, {"error": "نام کاربری فروشگاه سواپ ولت تنظیم نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها اقدام کنید."}
     payload = json.dumps({

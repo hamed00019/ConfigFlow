@@ -4399,7 +4399,7 @@ def _dispatch_callback(call, uid, data):
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سواپ ولت", url="https://swapwallet.app"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
-        key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>" if api_key else "➖ نیاز نیست (اختیاری)"
+        key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>" if api_key else "❌ <b>ثبت نشده — الزامی</b>"
         user_status = "✅ ثبت شده" if username else "❌ ثبت نشده"
         text = (
             "🏦 <b>درگاه پرداخت آنلاین ریالی (SwapWallet)</b>\n\n"
@@ -4407,15 +4407,15 @@ def _dispatch_callback(call, uid, data):
             f"نمایش: {vis_label}\n\n"
             f"👤 نام کاربری Application: <code>{esc(username or 'ثبت نشده')}</code> {user_status}\n"
             f"🔑 کلید API: {key_display}\n\n"
-            "⚠️ <b>مهم — پیش‌نیاز:</b>\n"
-            "این درگاه نیاز به یک <b>Application</b> (کسب‌وکار) جداگانه\n"
-            "در SwapWallet دارد، نه اکانت شخصی.\n\n"
             "📖 <b>مراحل راه‌اندازی:</b>\n"
-            "۱. ربات @SwapWalletBot را باز کنید\n"
-            "۲. به بخش <b>کسب‌وکار / Business</b> بروید\n"
-            "۳. یک کسب‌وکار جدید بسازید\n"
-            "۴. <b>نام کاربری همان کسب‌وکار</b> را اینجا وارد کنید\n"
-            "۵. کلید API اختیاری است (برای این درگاه نیاز نیست)"
+            "1️⃣ در مینی‌اپ سواپ‌ولت استارت بزنید:\n"
+            "   👉 @SwapWalletBot\n"
+            "2️⃣ در پنل بیزنس با تلگرام لاگین کنید:\n"
+            "   👉 business.swapwallet.app\n"
+            "3️⃣ یک فروشگاه جدید بسازید\n"
+            "4️⃣ <b>نام فروشگاه</b> رو به عنوان نام کاربری اینجا وارد کنید\n"
+            "5️⃣ از تب <b>پروفایل ← کلید API</b> کلید بگیرید و وارد کنید\n\n"
+            "⚠️ کلید API برای بررسی وضعیت پرداخت <b>الزامی</b> است."
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -4438,7 +4438,12 @@ def _dispatch_callback(call, uid, data):
     if data == "adm:set:swapwallet_key":
         state_set(uid, "admin_set_swapwallet_key")
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "🔑 کلید API سواپ ولت را ارسال کنید (مثال: <code>apikey-xxx...</code>):", back_button("adm:set:gw:swapwallet"))
+        send_or_edit(call,
+            "🔑 <b>کلید API (SwapWallet) را ارسال کنید</b>\n\n"
+            "فرمت: <code>apikey-xxx...</code>\n\n"
+            "📍 برای دریافت:\n"
+            "اپ سواپ‌ولت ← پروفایل ← <b>کلید API</b>",
+            back_button("adm:set:gw:swapwallet"))
         return
 
     if data == "adm:set:swapwallet_username":
@@ -4446,7 +4451,8 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         current = setting_get("swapwallet_username", "")
         send_or_edit(call,
-            f"👤 نام کاربری فروشگاه سواپ ولت را ارسال کنید.\n"
+            f"👤 <b>نام کاربری فروشگاه (SwapWallet) را ارسال کنید</b>\n\n"
+            f"این همان <b>نام فروشگاه</b> شما در پنل بیزنس است.\n"
             f"مقدار فعلی: <code>{esc(current or 'ثبت نشده')}</code>",
             back_button("adm:set:gw:swapwallet"))
         return
@@ -4481,15 +4487,14 @@ def _dispatch_callback(call, uid, data):
             f"👤 نام کاربری Application: <code>{esc(username or 'ثبت نشده')}</code> {user_status}\n"
             f"🔑 کلید API: {key_display}\n\n"
             "📖 <b>شبکه‌های پشتیبانی:</b> TRON · TON · BSC\n\n"
-            "⚠️ <b>مهم — پیش‌نیاز:</b>\n"
-            "این درگاه نیاز به یک <b>Application</b> (کسب‌وکار) جداگانه\n"
-            "در SwapWallet دارد، نه اکانت شخصی.\n\n"
             "📖 <b>مراحل راه‌اندازی:</b>\n"
-            "۱. ربات @SwapWalletBot را باز کنید\n"
-            "۲. به بخش <b>کسب‌وکار / Business</b> بروید\n"
-            "۳. یک کسب‌وکار جدید بسازید\n"
-            "۴. <b>نام کاربری همان کسب‌وکار</b> را اینجا وارد کنید\n"
-            "۵. از پروفایل ← کلید API کلید بگیرید و وارد کنید"
+            "1️⃣ در مینی‌اپ سواپ‌ولت استارت بزنید:\n"
+            "   👉 @SwapWalletBot\n"
+            "2️⃣ در پنل بیزنس با تلگرام لاگین کنید:\n"
+            "   👉 business.swapwallet.app\n"
+            "3️⃣ یک فروشگاه جدید بسازید\n"
+            "4️⃣ <b>نام فروشگاه</b> رو به عنوان نام کاربری اینجا وارد کنید\n"
+            "5️⃣ از تب <b>پروفایل ← کلید API</b> کلید بگیرید و وارد کنید"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -4512,8 +4517,12 @@ def _dispatch_callback(call, uid, data):
     if data == "adm:set:swapwallet_crypto_key":
         state_set(uid, "admin_set_swapwallet_crypto_key")
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "🔑 کلید API سواپ ولت (کریپتو) را ارسال کنید (مثال: <code>apikey-xxx...</code>):",
-                     back_button("adm:set:gw:swapwallet_crypto"))
+        send_or_edit(call,
+            "🔑 <b>کلید API (SwapWallet کریپتو) را ارسال کنید</b>\n\n"
+            "فرمت: <code>apikey-xxx...</code>\n\n"
+            "📍 برای دریافت:\n"
+            "اپ سواپ‌ولت ← پروفایل ← <b>کلید API</b>",
+            back_button("adm:set:gw:swapwallet_crypto"))
         return
 
     if data == "adm:set:swapwallet_crypto_username":
@@ -4521,7 +4530,8 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         current = setting_get("swapwallet_crypto_username", "")
         send_or_edit(call,
-            f"👤 نام کاربری فروشگاه سواپ ولت (کریپتو) را ارسال کنید.\n"
+            f"👤 <b>نام کاربری فروشگاه (SwapWallet کریپتو) را ارسال کنید</b>\n\n"
+            f"این همان <b>نام فروشگاه</b> شما در پنل بیزنس است.\n"
             f"مقدار فعلی: <code>{esc(current or 'ثبت نشده')}</code>",
             back_button("adm:set:gw:swapwallet_crypto"))
         return
