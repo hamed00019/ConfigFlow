@@ -32,6 +32,7 @@ from ..db import (
     get_conn, create_pending_order, get_pending_order, search_users,
     notify_first_start_if_needed, update_config_field,
     add_pinned_message, update_pinned_message,
+    save_pinned_send, get_pinned_sends,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -1316,12 +1317,18 @@ def universal_handler(message):
             add_pinned_message(text)
             state_clear(uid)
             # Broadcast to all users and pin in each chat
+            from ..db import get_all_pinned_messages as _get_pins
+            from telebot import types as _types
             users = get_users()
             sent = 0
             pinned = 0
+            all_pins = _get_pins()
+            pin_id = all_pins[-1]["id"] if all_pins else None
             for u in users:
                 try:
                     sent_msg = bot.send_message(u["user_id"], text, parse_mode="HTML")
+                    if pin_id:
+                        save_pinned_send(pin_id, u["user_id"], sent_msg.message_id)
                     sent += 1
                     try:
                         bot.pin_chat_message(u["user_id"], sent_msg.message_id, disable_notification=True)
@@ -1330,9 +1337,7 @@ def universal_handler(message):
                         pass
                 except Exception:
                     pass
-            from ..db import get_all_pinned_messages
-            from telebot import types as _types
-            pins = get_all_pinned_messages()
+            pins = _get_pins()
             kb = _types.InlineKeyboardMarkup()
             kb.add(_types.InlineKeyboardButton("➕ افزودن پیام پین", callback_data="adm:pin:add"))
             for p in pins:
@@ -1358,10 +1363,19 @@ def universal_handler(message):
             pin_id = sd.get("pin_id")
             if pin_id:
                 update_pinned_message(pin_id, text)
+                # Edit the sent messages in all user chats
+                sends = get_pinned_sends(pin_id)
+                edited = 0
+                for s in sends:
+                    try:
+                        bot.edit_message_text(text, s["user_id"], s["message_id"], parse_mode="HTML")
+                        edited += 1
+                    except Exception:
+                        pass
             state_clear(uid)
-            from ..db import get_all_pinned_messages
+            from ..db import get_all_pinned_messages as _get_pins
             from telebot import types as _types
-            pins = get_all_pinned_messages()
+            pins = _get_pins()
             kb = _types.InlineKeyboardMarkup()
             kb.add(_types.InlineKeyboardButton("➕ افزودن پیام پین", callback_data="adm:pin:add"))
             for p in pins:
@@ -1373,7 +1387,11 @@ def universal_handler(message):
                 )
             kb.add(_types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
             count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
-            bot.send_message(uid, f"✅ پیام پین ویرایش شد.\n\n📌 <b>پیام‌های پین شده</b>\n\n{count_text}", reply_markup=kb, parse_mode="HTML")
+            edited_count = edited if pin_id else 0
+            bot.send_message(uid,
+                f"✅ پیام پین ویرایش شد.\n✏️ آپدیت شده: {edited_count} کاربر\n\n"
+                f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}",
+                reply_markup=kb, parse_mode="HTML")
             return
 
         # ── Panel: Add Traffic Package (multi-step) ────────────────────────────

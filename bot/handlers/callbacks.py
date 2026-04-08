@@ -36,6 +36,7 @@ from ..db import (
     reset_all_free_tests, user_has_any_test,
     get_all_pinned_messages, get_pinned_message, add_pinned_message,
     update_pinned_message, delete_pinned_message,
+    save_pinned_send, get_pinned_sends, delete_pinned_sends,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete
 from ..gateways.crypto import fetch_crypto_prices
@@ -4843,8 +4844,20 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         pin_id = int(data.split(":")[3])
+        # Unpin and delete sent messages from all user chats
+        sends = get_pinned_sends(pin_id)
+        for s in sends:
+            try:
+                bot.unpin_chat_message(s["user_id"], s["message_id"])
+            except Exception:
+                pass
+            try:
+                bot.delete_message(s["user_id"], s["message_id"])
+            except Exception:
+                pass
+        delete_pinned_sends(pin_id)
         delete_pinned_message(pin_id)
-        bot.answer_callback_query(call.id, "🗑 پیام حذف شد.")
+        bot.answer_callback_query(call.id, "🗑 پیام حذف و آنپین شد.")
         _fake_call(call, "adm:pin")
         return
 

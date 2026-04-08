@@ -171,6 +171,12 @@ def init_db():
                 text       TEXT    NOT NULL,
                 created_at TEXT    NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pinned_message_sends (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                pin_id     INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                message_id INTEGER NOT NULL
+            );
         """)
 
         defaults = {
@@ -1183,3 +1189,23 @@ def update_pinned_message(pin_id, text):
 def delete_pinned_message(pin_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM pinned_messages WHERE id=?", (pin_id,))
+
+
+def save_pinned_send(pin_id, user_id, message_id):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO pinned_message_sends(pin_id, user_id, message_id) VALUES(?,?,?)",
+            (pin_id, user_id, message_id)
+        )
+
+
+def get_pinned_sends(pin_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM pinned_message_sends WHERE pin_id=?", (pin_id,)
+        ).fetchall()
+
+
+def delete_pinned_sends(pin_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM pinned_message_sends WHERE pin_id=?", (pin_id,))
