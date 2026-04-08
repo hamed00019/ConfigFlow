@@ -72,6 +72,21 @@ def universal_handler(message):
         )
         return
 
+    # Bot status check for non-admins
+    if not is_admin(uid):
+        _bot_status = setting_get("bot_status", "on")
+        if _bot_status == "off":
+            return
+        if _bot_status == "update":
+            bot.send_message(
+                message.chat.id,
+                "🔄 <b>ربات در حال بروزرسانی است</b>\n\n"
+                "فعلاً ربات در حال بروزرسانی می‌باشد، لطفاً بعداً اقدام نمایید. 🙏\n\n"
+                "در صورتی که کار فوری دارید، می‌توانید با پشتیبانی در ارتباط باشید.",
+                parse_mode="HTML"
+            )
+            return
+
     # Channel check
     if not check_channel_membership(uid):
         channel_lock_message(message)

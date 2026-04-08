@@ -698,6 +698,9 @@ def _dispatch_callback(call, uid, data):
 
     # ── Renewal flow ──────────────────────────────────────────────────────────
     if data.startswith("renew:") and not data.startswith("renew:p:") and not data.startswith("renew:confirm:"):
+        if setting_get("manual_renewal_enabled", "1") != "1" and not is_admin(uid):
+            bot.answer_callback_query(call.id, "⛔ تمدید در حال حاضر غیرفعال است.", show_alert=True)
+            return
         purchase_id = int(data.split(":")[1])
         item = get_purchase(purchase_id)
         if not item or item["user_id"] != uid:
@@ -3713,6 +3716,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
+        kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
         kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
         kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
         kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
@@ -4039,6 +4043,75 @@ def _dispatch_callback(call, uid, data):
         from types import SimpleNamespace as _SN
         fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data="adm:set:shop")
         _dispatch_callback(fake, uid, "adm:set:shop")
+        return
+
+    # ── Bot Operations Management ─────────────────────────────────────────────
+    def _build_ops_kb():
+        bot_status      = setting_get("bot_status", "on")
+        renewal_enabled = setting_get("manual_renewal_enabled", "1")
+        status_map = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}
+        renewal_map = {"1": "✅ فعال", "0": "❌ غیرفعال"}
+        status_label  = status_map.get(bot_status, "🟢 روشن")
+        renewal_label = renewal_map.get(renewal_enabled, "✅ فعال")
+        ops_kb = types.InlineKeyboardMarkup(row_width=2)
+        ops_kb.row(
+            types.InlineKeyboardButton("🤖 وضعیت ربات",        callback_data="adm:ops:noop"),
+            types.InlineKeyboardButton("♻️ تمدید دستی",          callback_data="adm:ops:noop"),
+        )
+        ops_kb.row(
+            types.InlineKeyboardButton(status_label,  callback_data="adm:ops:status"),
+            types.InlineKeyboardButton(renewal_label, callback_data="adm:ops:renewal"),
+        )
+        ops_kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        return ops_kb
+
+    def _ops_menu_text():
+        bot_status      = setting_get("bot_status", "on")
+        renewal_enabled = setting_get("manual_renewal_enabled", "1")
+        status_fa  = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}.get(bot_status, "🟢 روشن")
+        renewal_fa = "✅ فعال" if renewal_enabled == "1" else "❌ غیرفعال"
+        return (
+            "🤖 <b>مدیریت عملیات ربات</b>\n\n"
+            f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
+            f"🔹 <b>تمدید کانفیگ‌های ثبت دستی:</b> {renewal_fa}\n\n"
+            "برای تغییر هر مورد، دکمه وضعیت فعلی آن را لمس کنید."
+        )
+
+    if data == "adm:ops":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+    if data == "adm:ops:noop":
+        bot.answer_callback_query(call.id)
+        return
+
+    if data == "adm:ops:status":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("bot_status", "on")
+        cycle = {"on": "off", "off": "update", "update": "on"}
+        new_status = cycle.get(cur, "on")
+        setting_set("bot_status", new_status)
+        labels = {"on": "روشن", "off": "خاموش", "update": "بروزرسانی"}
+        bot.answer_callback_query(call.id, f"وضعیت ربات: {labels[new_status]}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+    if data == "adm:ops:renewal":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("manual_renewal_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("manual_renewal_enabled", new_val)
+        label = "فعال" if new_val == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"تمدید دستی: {label}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
         return
 
     # ── Gateway settings ─────────────────────────────────────────────────────

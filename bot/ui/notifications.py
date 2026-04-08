@@ -57,7 +57,8 @@ def deliver_purchase_message(chat_id, purchase_id):
     bio.name = "qrcode.png"
 
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
+    if setting_get("manual_renewal_enabled", "1") == "1":
+        kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
     bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
 
