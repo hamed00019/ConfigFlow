@@ -254,23 +254,23 @@ def universal_handler(message):
             state_set(uid, "wallet_charge_method", amount=amount)
             _gw_labels = []
             kb = types.InlineKeyboardMarkup()
-            if is_gateway_available("card", uid, amount) and is_card_info_complete():
+            if is_gateway_available("card", uid) and is_card_info_complete():
                 _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
                 kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:card"))
                 _gw_labels.append(("card", _lbl))
-            if is_gateway_available("crypto", uid, amount):
+            if is_gateway_available("crypto", uid):
                 _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
                 kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:crypto"))
                 _gw_labels.append(("crypto", _lbl))
-            if is_gateway_available("tetrapay", uid, amount):
+            if is_gateway_available("tetrapay", uid):
                 _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
                 kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tetrapay"))
                 _gw_labels.append(("tetrapay", _lbl))
-            if is_gateway_available("swapwallet_crypto", uid, amount):
+            if is_gateway_available("swapwallet_crypto", uid):
                 _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
                 kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:swapwallet_crypto"))
                 _gw_labels.append(("swapwallet_crypto", _lbl))
-            if is_gateway_available("tronpays_rial", uid, amount):
+            if is_gateway_available("tronpays_rial", uid):
                 _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
                 kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronpays_rial"))
                 _gw_labels.append(("tronpays_rial", _lbl))

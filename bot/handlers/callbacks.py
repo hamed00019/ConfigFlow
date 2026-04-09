@@ -815,23 +815,23 @@ def _dispatch_callback(call, uid, data):
         _gw_labels = []
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"rpay:wallet:{purchase_id}:{package_id}"))
-        if is_gateway_available("card", uid, price) and is_card_info_complete():
+        if is_gateway_available("card", uid) and is_card_info_complete():
             _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:card:{purchase_id}:{package_id}"))
             _gw_labels.append(("card", _lbl))
-        if is_gateway_available("crypto", uid, price):
+        if is_gateway_available("crypto", uid):
             _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:crypto:{purchase_id}:{package_id}"))
             _gw_labels.append(("crypto", _lbl))
-        if is_gateway_available("tetrapay", uid, price):
+        if is_gateway_available("tetrapay", uid):
             _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tetrapay:{purchase_id}:{package_id}"))
             _gw_labels.append(("tetrapay", _lbl))
-        if is_gateway_available("swapwallet_crypto", uid, price):
+        if is_gateway_available("swapwallet_crypto", uid):
             _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:swapwallet_crypto:{purchase_id}:{package_id}"))
             _gw_labels.append(("swapwallet_crypto", _lbl))
-        if is_gateway_available("tronpays_rial", uid, price):
+        if is_gateway_available("tronpays_rial", uid):
             _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronpays_rial:{purchase_id}:{package_id}"))
             _gw_labels.append(("tronpays_rial", _lbl))
@@ -1295,23 +1295,23 @@ def _dispatch_callback(call, uid, data):
         _gw_labels = []
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"pay:wallet:{package_id}"))
-        if is_gateway_available("card", uid, price) and is_card_info_complete():
+        if is_gateway_available("card", uid) and is_card_info_complete():
             _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:card:{package_id}"))
             _gw_labels.append(("card", _lbl))
-        if is_gateway_available("crypto", uid, price):
+        if is_gateway_available("crypto", uid):
             _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:crypto:{package_id}"))
             _gw_labels.append(("crypto", _lbl))
-        if is_gateway_available("tetrapay", uid, price):
+        if is_gateway_available("tetrapay", uid):
             _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tetrapay:{package_id}"))
             _gw_labels.append(("tetrapay", _lbl))
-        if is_gateway_available("swapwallet_crypto", uid, price):
+        if is_gateway_available("swapwallet_crypto", uid):
             _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:swapwallet_crypto:{package_id}"))
             _gw_labels.append(("swapwallet_crypto", _lbl))
-        if is_gateway_available("tronpays_rial", uid, price):
+        if is_gateway_available("tronpays_rial", uid):
             _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
             kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronpays_rial:{package_id}"))
             _gw_labels.append(("tronpays_rial", _lbl))
