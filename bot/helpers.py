@@ -2,11 +2,9 @@
 import html
 import json
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 from telebot import types
-
-_TZ_TEHRAN = timezone(timedelta(hours=3, minutes=30))
 
 from .config import ADMIN_IDS, PERM_USER_FULL
 from .bot_instance import bot, USER_STATE, PERSIAN_DIGITS
@@ -14,7 +12,7 @@ from .bot_instance import bot, USER_STATE, PERSIAN_DIGITS
 
 # ── Time ───────────────────────────────────────────────────────────────────────
 def now_str():
-    return datetime.now(_TZ_TEHRAN).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ── Admin auth ─────────────────────────────────────────────────────────────────

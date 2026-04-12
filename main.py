@@ -7,7 +7,6 @@ Run with:  python main.py
 import threading
 
 from bot.db import init_db
-from bot.db import cleanup_stale_reservations
 from bot.ui.helpers import set_bot_commands
 from bot.db import setting_get
 from bot.admin.backup import _backup_loop
@@ -18,7 +17,6 @@ from bot.bot_instance import bot  # must come after to avoid being shadowed by t
 
 def main():
     init_db()
-    cleanup_stale_reservations()
     set_bot_commands()
 
     # Start backup thread
