@@ -260,6 +260,8 @@ def init_db():
             "referral_start_reward_type":     "wallet",
             "referral_start_reward_amount":   "0",
             "referral_start_reward_package":  "",
+            # "invite_only" = reward after start | "channel_join" = reward after channel join
+            "referral_start_reward_mode":     "invite_only",
             "referral_purchase_reward_enabled": "0",
             "referral_purchase_reward_count":   "1",
             "referral_purchase_reward_type":    "wallet",
@@ -289,6 +291,8 @@ def init_db():
             "CREATE TABLE IF NOT EXISTS referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referee_id INTEGER NOT NULL UNIQUE, created_at TEXT NOT NULL, start_reward_given INTEGER NOT NULL DEFAULT 0, purchase_reward_given INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS agency_request_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, referee_uid INTEGER NOT NULL, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS payment_admin_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, admin_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
+            # v2: channel_joined tracking for referral start reward
+            "ALTER TABLE referrals ADD COLUMN channel_joined INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -1364,11 +1368,29 @@ def mark_purchase_reward_given(referrer_id, referee_ids):
             )
 
 
+def mark_referee_channel_joined(referee_id):
+    """Mark that the invited user (referee) has joined the required channel."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE referrals SET channel_joined=1 WHERE referee_id=?",
+            (referee_id,)
+        )
+
+
 def get_unrewarded_start_referrals(referrer_id):
-    """Get referees who haven't been rewarded for starting yet."""
+    """Get referees who haven't been rewarded for starting yet (invite_only mode)."""
     with get_conn() as conn:
         return conn.execute(
             "SELECT * FROM referrals WHERE referrer_id=? AND start_reward_given=0",
+            (referrer_id,)
+        ).fetchall()
+
+
+def get_unrewarded_start_referrals_channel(referrer_id):
+    """Get referees who joined channel but start reward not given yet (channel_join mode)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM referrals WHERE referrer_id=? AND start_reward_given=0 AND channel_joined=1",
             (referrer_id,)
         ).fetchall()
 

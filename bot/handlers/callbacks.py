@@ -33,7 +33,7 @@ from ..db import (
     get_all_panels, get_panel, add_panel, delete_panel,
     get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
     get_conn, create_pending_order, get_pending_order, add_config, search_users,
-    reset_all_free_tests, user_has_any_test,
+    reset_all_free_tests, user_has_any_test, agent_test_count_in_period,
     get_all_pinned_messages, get_pinned_message, add_pinned_message,
     update_pinned_message, delete_pinned_message,
     save_pinned_send, get_pinned_sends, delete_pinned_sends,
@@ -237,6 +237,13 @@ def on_callback(call):
             ensure_user(call.from_user)
             if check_channel_membership(uid):
                 bot.answer_callback_query(call.id, "✅ عضویت تأیید شد!")
+                # In channel_join reward mode: give start reward to inviter
+                # only when THIS user (invited_user) has just confirmed channel membership
+                try:
+                    from ..ui.notifications import check_and_give_referral_start_reward_after_channel_join
+                    check_and_give_referral_start_reward_after_channel_join(uid)
+                except Exception:
+                    pass
                 show_main_menu(call)
             else:
                 bot.answer_callback_query(call.id, "❌ هنوز عضو کانال نشده‌اید.", show_alert=True)
@@ -1759,7 +1766,7 @@ def _dispatch_callback(call, uid, data):
         kb    = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
-            packs = [p for p in get_packages(type_id=item['id'], price_only=0) if p['stock'] > 0]
+            packs = [p for p in get_packages(type_id=item['id']) if p['stock'] > 0]
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🎁 {item['name']}", callback_data=f"test:t:{item['id']}"))
                 has_any = True
@@ -1795,7 +1802,7 @@ def _dispatch_callback(call, uid, data):
         type_id     = int(data.split(":")[2])
         type_row    = get_type(type_id)
         package_row = None
-        for item in get_packages(type_id=type_id, price_only=0):
+        for item in get_packages(type_id=type_id):
             if item["stock"] > 0:
                 package_row = item
                 break
@@ -4485,6 +4492,8 @@ def _dispatch_callback(call, uid, data):
         pr_count = setting_get("referral_purchase_reward_count", "1")
         sr_type_label = "💰 کیف پول" if sr_type == "wallet" else "📦 کانفیگ"
         pr_type_label = "💰 کیف پول" if pr_type == "wallet" else "📦 کانفیگ"
+        reward_mode = setting_get("referral_start_reward_mode", "invite_only")
+        mode_label = "📨 فقط دعوت به ربات" if reward_mode == "invite_only" else "📢 دعوت + عضویت کانال"
 
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📸 تنظیم بنر اشتراک‌گذاری", callback_data="adm:ref:banner"))
@@ -4494,6 +4503,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(sr_label, callback_data="adm:ref:sr:toggle"),
             types.InlineKeyboardButton("وضعیت هدیه استارت", callback_data="adm:ops:noop"),
         )
+        kb.add(types.InlineKeyboardButton(f"🔑 شرط ریوارد: {mode_label}", callback_data="adm:ref:sr:mode"))
         kb.add(types.InlineKeyboardButton(f"📊 تعداد: {sr_count} زیرمجموعه", callback_data="adm:ref:sr:count"))
         kb.add(types.InlineKeyboardButton(f"🎯 نوع هدیه: {sr_type_label}", callback_data="adm:ref:sr:type"))
         if sr_type == "wallet":
@@ -4534,8 +4544,11 @@ def _dispatch_callback(call, uid, data):
     def _ref_settings_text():
         sr_enabled = "✅ فعال" if setting_get("referral_start_reward_enabled", "0") == "1" else "❌ غیرفعال"
         pr_enabled = "✅ فعال" if setting_get("referral_purchase_reward_enabled", "0") == "1" else "❌ غیرفعال"
+        reward_mode = setting_get("referral_start_reward_mode", "invite_only")
+        mode_text = "📨 فقط دعوت به ربات" if reward_mode == "invite_only" else "📢 دعوت + عضویت کانال"
         return (
             "⚙️ <b>تنظیمات زیرمجموعه‌گیری</b>\n\n"
+            f"🔑 <b>شرط ریوارد استارت:</b> {mode_text}\n"
             f"🎁 هدیه استارت: {sr_enabled}\n"
             f"💸 هدیه خرید زیرمجموعه: {pr_enabled}\n\n"
             "هر بخش را با دکمه‌های زیر تنظیم کنید."
@@ -4594,6 +4607,19 @@ def _dispatch_callback(call, uid, data):
         setting_set("referral_start_reward_enabled", "0" if cur == "1" else "1")
         log_admin_action(uid, f"هدیه استارت زیرمجموعه {'غیرفعال' if cur == '1' else 'فعال'} شد")
         bot.answer_callback_query(call.id)
+        send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
+        return
+
+    if data == "adm:ref:sr:mode":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("referral_start_reward_mode", "invite_only")
+        new_val = "channel_join" if cur == "invite_only" else "invite_only"
+        setting_set("referral_start_reward_mode", new_val)
+        label = "دعوت + عضویت کانال" if new_val == "channel_join" else "فقط دعوت به ربات"
+        log_admin_action(uid, f"شرط ریوارد استارت تغییر کرد به: {label}")
+        bot.answer_callback_query(call.id, f"✅ شرط ریوارد: {label}")
         send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
         return
 

@@ -24,13 +24,22 @@ def start_handler(message):
                 referrer_id = int(parts[1][4:])
                 if referrer_id != uid:
                     add_referral(referrer_id, uid)
-                    # Check & give start reward, then log the join
-                    from ..ui.notifications import check_and_give_referral_start_reward, notify_referral_join
-                    check_and_give_referral_start_reward(referrer_id)
+                    # Notify admins of the new referral join (log only)
                     try:
+                        from ..ui.notifications import notify_referral_join
                         notify_referral_join(referrer_id, uid)
                     except Exception:
                         pass
+                    # In 'invite_only' mode: check & give reward after start
+                    # In 'channel_join' mode: reward is deferred until channel membership confirmed
+                    reward_mode = setting_get("referral_start_reward_mode", "invite_only")
+                    if reward_mode == "invite_only":
+                        try:
+                            from ..ui.notifications import check_and_give_referral_start_reward
+                            check_and_give_referral_start_reward(referrer_id)
+                        except Exception:
+                            pass
+                    # NOTE: In 'channel_join' mode, reward is given in check_channel callback
             except (ValueError, Exception):
                 pass
 

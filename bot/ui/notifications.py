@@ -16,9 +16,10 @@ from ..db import (
     fulfill_pending_order, get_waiting_pending_orders_for_package,
     get_pending_order, get_all_admin_users, setting_get,
     count_referrals, get_unrewarded_start_referrals,
+    get_unrewarded_start_referrals_channel,
     mark_start_reward_given, get_unrewarded_purchase_referees,
     mark_purchase_reward_given, get_referral_by_referee,
-    update_balance,
+    update_balance, mark_referee_channel_joined,
 )
 from ..helpers import esc, fmt_price
 from ..bot_instance import bot
@@ -305,21 +306,29 @@ def auto_fulfill_pending_orders(package_id):
 def _give_referral_reward(referrer_id, reward_prefix):
     """Give a referral reward (wallet charge or config) to referrer_id.
     reward_prefix: 'referral_start_reward' or 'referral_purchase_reward'
+    This function should only be called ONCE per eligible batch - callers are responsible
+    for idempotency (marking reward_given before calling this).
     """
     reward_type = setting_get(f"{reward_prefix}_type", "wallet")
     if reward_type == "wallet":
         amount = int(setting_get(f"{reward_prefix}_amount", "0"))
         if amount > 0:
             update_balance(referrer_id, amount)
+            msg = (
+                f"🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
+                f"✅ تبریک! زیرمجموعه‌ات شرایط رو کامل کرد.\n"
+                f"💰 مبلغ <b>{fmt_price(amount)}</b> تومان به کیف پول شما اضافه شد. 🎉"
+            )
             try:
-                bot.send_message(
-                    referrer_id,
-                    f"🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
-                    f"💰 مبلغ <b>{fmt_price(amount)}</b> تومان به کیف پول شما اضافه شد.",
-                    parse_mode="HTML"
-                )
+                bot.send_message(referrer_id, msg, parse_mode="HTML")
             except Exception:
                 pass
+            send_to_topic("wallet_log",
+                f"🎁 <b>هدیه زیرمجموعه‌گیری</b>\n\n"
+                f"👤 دعوت‌کننده: <code>{referrer_id}</code>\n"
+                f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+                f"📌 نوع: {'ریوارد عضویت' if reward_prefix == 'referral_start_reward' else 'ریوارد خرید'}"
+            )
     else:
         # Config reward
         pkg_id = setting_get(f"{reward_prefix}_package", "")
@@ -334,6 +343,7 @@ def _give_referral_reward(referrer_id, reward_prefix):
                 bot.send_message(
                     referrer_id,
                     "🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
+                    "✅ زیرمجموعه‌ات شرایط رو کامل کرد!\n"
                     "⚠️ متأسفانه موجودی کانفیگ هدیه تمام شده. "
                     "لطفاً به پشتیبانی اطلاع دهید.",
                     parse_mode="HTML"
@@ -349,6 +359,7 @@ def _give_referral_reward(referrer_id, reward_prefix):
             bot.send_message(
                 referrer_id,
                 "🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
+                "✅ زیرمجموعه‌ات شرایط رو کامل کرد!\n"
                 "یک کانفیگ رایگان به شما تعلق گرفت! 🎉\n"
                 "جزئیات سرویس در ادامه ارسال می‌شود.",
                 parse_mode="HTML"
@@ -445,13 +456,49 @@ def notify_referral_first_purchase(referee_id):
 
 
 def check_and_give_referral_start_reward(referrer_id):
-    """Check if referrer qualifies for start reward and give it."""
+    """
+    Called ONLY in 'invite_only' mode (after invited_user starts the bot).
+    Checks if referrer qualifies for start reward and gives it once.
+    """
     if setting_get("referral_start_reward_enabled", "0") != "1":
+        return
+    reward_mode = setting_get("referral_start_reward_mode", "invite_only")
+    if reward_mode != "invite_only":
+        # In channel_join mode, reward is given after channel join - do NOT give here
         return
     required_count = int(setting_get("referral_start_reward_count", "1"))
     unrewarded = get_unrewarded_start_referrals(referrer_id)
     if len(unrewarded) >= required_count:
-        # Give reward and mark referees as rewarded
+        batch = [r["referee_id"] for r in unrewarded[:required_count]]
+        mark_start_reward_given(referrer_id, batch)
+        _give_referral_reward(referrer_id, "referral_start_reward")
+
+
+def check_and_give_referral_start_reward_after_channel_join(referee_id):
+    """
+    Called after invited_user (referee) joins the required channel.
+    Only in 'channel_join' mode: marks channel_joined and gives reward to inviter if eligible.
+    This is the ONLY place reward is given in channel_join mode.
+    De-duplicated: reward is never given twice for the same referee.
+    """
+    if setting_get("referral_start_reward_enabled", "0") != "1":
+        return
+    reward_mode = setting_get("referral_start_reward_mode", "invite_only")
+    if reward_mode != "channel_join":
+        return
+    ref = get_referral_by_referee(referee_id)
+    if not ref:
+        return
+    # Idempotency: if reward already given for this referee, skip
+    if ref["start_reward_given"]:
+        return
+    # Mark channel joined for this referee (idempotent)
+    mark_referee_channel_joined(referee_id)
+    referrer_id = ref["referrer_id"]
+    required_count = int(setting_get("referral_start_reward_count", "1"))
+    # Get all eligible (channel_joined=1, start_reward_given=0) referees for this referrer
+    unrewarded = get_unrewarded_start_referrals_channel(referrer_id)
+    if len(unrewarded) >= required_count:
         batch = [r["referee_id"] for r in unrewarded[:required_count]]
         mark_start_reward_given(referrer_id, batch)
         _give_referral_reward(referrer_id, "referral_start_reward")
