@@ -15,11 +15,10 @@ from ..db import (
     assign_config_to_user, get_available_configs_for_package,
     fulfill_pending_order, get_waiting_pending_orders_for_package,
     get_pending_order, get_all_admin_users, setting_get,
-    count_referrals, get_unrewarded_start_referrals,
-    get_unrewarded_start_referrals_channel,
-    mark_start_reward_given, get_unrewarded_purchase_referees,
+    count_referrals, get_unrewarded_purchase_referees,
     mark_purchase_reward_given, get_referral_by_referee,
-    update_balance, mark_referee_channel_joined,
+    update_balance,
+    set_referral_channel_joined, try_claim_start_reward_batch,
 )
 from ..helpers import esc, fmt_price
 from ..bot_instance import bot
@@ -148,7 +147,7 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
     )
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("✅ تمدید انجام شد",
-                                       callback_data=f"renew:confirm:{config_id}:{user_id}"))
+                                    callback_data=f"renew:confirm:{config_id}:{user_id}"))
     if _own_notif_on("renewal_request"):
         for admin_id in ADMIN_IDS:
             try:
@@ -192,7 +191,7 @@ def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, met
     )
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📝 ثبت کانفیگ برای این سفارش",
-                                       callback_data=f"adm:pending:addcfg:{pending_id}"))
+                                    callback_data=f"adm:pending:addcfg:{pending_id}"))
     if _own_notif_on("payment_approval"):
         for admin_id in ADMIN_IDS:
             try:
@@ -455,67 +454,64 @@ def notify_referral_first_purchase(referee_id):
     send_to_topic("referral_log", text, reply_markup=kb)
 
 
+def _channel_reward_required() -> bool:
+    """Return True if channel membership must be confirmed before the start reward fires."""
+    return (
+        setting_get("referral_start_reward_mode", "invite_only") == "channel_join"
+        and bool(setting_get("channel_id", "").strip())
+    )
+
+
 def check_and_give_referral_start_reward(referrer_id):
     """
-    Called ONLY in 'invite_only' mode (after invited_user starts the bot).
-    Checks if referrer qualifies for start reward and gives it once.
+    Check if referrer now qualifies for a start reward and give it once.
+    Thread-safe: uses atomic SQL claim so concurrent calls cannot double-reward.
+    Works for both invite_only and channel_join modes.
     """
     if setting_get("referral_start_reward_enabled", "0") != "1":
         return
-    reward_mode = setting_get("referral_start_reward_mode", "invite_only")
-    if reward_mode != "invite_only":
-        # In channel_join mode, reward is given after channel join - do NOT give here
-        return
-    required_count = int(setting_get("referral_start_reward_count", "1"))
-    unrewarded = get_unrewarded_start_referrals(referrer_id)
-    if len(unrewarded) >= required_count:
-        batch = [r["referee_id"] for r in unrewarded[:required_count]]
-        mark_start_reward_given(referrer_id, batch)
+    required_count = int(setting_get("referral_start_reward_count", "1") or "1")
+    channel_required = _channel_reward_required()
+    if try_claim_start_reward_batch(referrer_id, required_count, channel_required):
         _give_referral_reward(referrer_id, "referral_start_reward")
 
 
-def check_and_give_referral_start_reward_after_channel_join(referee_id):
+def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
     """
-    Called after invited_user (referee) joins the required channel (channel_join mode only).
-    - Marks channel_joined in DB (idempotent via channel_joined flag)
-    - Fires the deferred notify_referral_join log
-    - Gives start reward to referrer if enabled and threshold is reached
+    Called when a referee confirms channel membership (via check_channel callback
+    OR immediately at /start if they were already a member).
+
+    Flow:
+    1. Look up the referral record — if none, nothing to do.
+    2. Atomically set channel_joined 0→1. If it was already 1, stop (dedup).
+    3. Send the deferred notify_referral_join log.
+    4. Try to give the start reward to the referrer (atomic claim).
+
+    NOTE: channel_joined is always recorded regardless of whether the reward
+    feature is currently on, so that enabling rewards later correctly counts
+    already-joined referees.
     """
-    # Only applies to channel_join mode
-    reward_mode = setting_get("referral_start_reward_mode", "invite_only")
-    if reward_mode != "channel_join":
-        return
+    if not _channel_reward_required():
+        return  # invite_only mode — reward was already handled at /start time
 
     ref = get_referral_by_referee(referee_id)
     if not ref:
         return
-
-    # Idempotent: if already processed (channel_joined), skip entirely
-    if ref["channel_joined"]:
-        return
-
-    # Mark channel joined — this is the single activation point
-    mark_referee_channel_joined(referee_id)
     referrer_id = ref["referrer_id"]
 
-    # Fire the deferred join log (was intentionally NOT sent in start.py for this mode)
+    # Atomic 0→1 transition — only the first call does work
+    changed = set_referral_channel_joined(referee_id)
+    if not changed:
+        return  # already processed previously
+
+    # Send the deferred join log
     try:
         notify_referral_join(referrer_id, referee_id)
     except Exception:
         pass
 
-    # Give start reward only if enabled
-    if setting_get("referral_start_reward_enabled", "0") != "1":
-        return
-    if ref["start_reward_given"]:
-        return
-    required_count = int(setting_get("referral_start_reward_count", "1"))
-    # Get all eligible (channel_joined=1, start_reward_given=0) referees for this referrer
-    unrewarded = get_unrewarded_start_referrals_channel(referrer_id)
-    if len(unrewarded) >= required_count:
-        batch = [r["referee_id"] for r in unrewarded[:required_count]]
-        mark_start_reward_given(referrer_id, batch)
-        _give_referral_reward(referrer_id, "referral_start_reward")
+    # Try to give start reward to referrer
+    check_and_give_referral_start_reward(referrer_id)
 
 
 def check_and_give_referral_purchase_reward(buyer_user_id):

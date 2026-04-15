@@ -24,15 +24,18 @@ def start_handler(message):
                 referrer_id = int(parts[1][4:])
                 if referrer_id != uid:
                     add_referral(referrer_id, uid)
-                    # Notify admins of the new referral join (log only)
-                    try:
-                        from ..ui.notifications import notify_referral_join
-                        notify_referral_join(referrer_id, uid)
-                    except Exception:
-                        pass
-                    # Reward is ALWAYS deferred until referee also joins the channel.
-                    # check_and_give_referral_start_reward_after_channel_join is called
-                    # from the check_channel callback once membership is confirmed.
+                    reward_mode = setting_get("referral_start_reward_mode", "invite_only")
+                    if reward_mode == "invite_only":
+                        # invite_only: log and reward activate immediately on bot start
+                        try:
+                            from ..ui.notifications import notify_referral_join, check_and_give_referral_start_reward
+                            notify_referral_join(referrer_id, uid)
+                            check_and_give_referral_start_reward(referrer_id)
+                        except Exception:
+                            pass
+                    # channel_join: log and reward are deferred until the referee
+                    # confirms channel membership (via check_channel callback or
+                    # by already being a member at start time – handled below).
             except (ValueError, Exception):
                 pass
 
@@ -64,4 +67,13 @@ def start_handler(message):
     if not check_channel_membership(uid):
         channel_lock_message(message)
         return
+
+    # User is already a channel member. In channel_join mode, if they arrived via a
+    # referral link they would never click "check channel" – activate their referral now.
+    try:
+        from ..ui.notifications import try_give_referral_start_reward_for_channel_join
+        try_give_referral_start_reward_for_channel_join(uid)
+    except Exception:
+        pass
+
     show_main_menu(message)

@@ -240,8 +240,8 @@ def on_callback(call):
                 # In channel_join reward mode: give start reward to inviter
                 # only when THIS user (invited_user) has just confirmed channel membership
                 try:
-                    from ..ui.notifications import check_and_give_referral_start_reward_after_channel_join
-                    check_and_give_referral_start_reward_after_channel_join(uid)
+                    from ..ui.notifications import try_give_referral_start_reward_for_channel_join
+                    try_give_referral_start_reward_for_channel_join(uid)
                 except Exception:
                     pass
                 show_main_menu(call)

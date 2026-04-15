@@ -1351,6 +1351,43 @@ def count_referee_first_purchases(referrer_id):
         ).fetchone()["n"]
 
 
+def set_referral_channel_joined(referee_id: int) -> bool:
+    """
+    Atomically mark that a referee has joined the channel (0 → 1 transition).
+    Returns True only if this call performed the transition (first-ever join).
+    Idempotent: safe to call multiple times.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE referrals SET channel_joined=1 WHERE referee_id=? AND channel_joined=0",
+            (referee_id,),
+        )
+        return cur.rowcount > 0
+
+
+def try_claim_start_reward_batch(referrer_id: int, required_count: int,
+                                  channel_required: bool) -> bool:
+    """
+    Atomically claim `required_count` eligible unrewarded start-referrals.
+    Uses a single UPDATE+subquery so only one concurrent caller can win.
+    Returns True if the batch was fully claimed (caller should now give reward).
+    """
+    ch = "AND channel_joined=1" if channel_required else ""
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"""UPDATE referrals
+                   SET start_reward_given=1
+                 WHERE referrer_id=? AND start_reward_given=0 {ch}
+                   AND referee_id IN (
+                         SELECT referee_id FROM referrals
+                          WHERE referrer_id=? AND start_reward_given=0 {ch}
+                          LIMIT ?
+                       )""",
+            (referrer_id, referrer_id, required_count),
+        )
+        return cur.rowcount >= required_count
+
+
 def mark_start_reward_given(referrer_id, referee_ids):
     with get_conn() as conn:
         for rid in referee_ids:
