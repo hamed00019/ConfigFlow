@@ -2229,9 +2229,9 @@ def _dispatch_callback(call, uid, data):
             "بخش مورد نظر را انتخاب کنید:\n\n"
             "────────────────\n"
             "💡 <b>ConfigFlow v2.0</b>\n"
-            "👨‍💻 Developer: @Emad_Habibnia\n"
-            "🌐 <a href='https://github.com/Emadhabibnia1385/ConfigFlow'>GitHub ConfigFlow</a>\n"
-            "❤️ <a href='https://t.me/EmadHabibnia/4'>donate</a>"
+            "👨‍💻 Developer: @bothamedehsan\n"
+            "🌐 <a href='https://github.com/hamed00019/ConfigFlow'>GitHub ConfigFlow</a>\n"
+            "❤️ <a href='https://t.me/bothamedehsan'>donate</a>"
         )
         send_or_edit(call, text, kb_admin_panel(uid))
         return
