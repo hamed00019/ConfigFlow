@@ -269,7 +269,7 @@ def init_db():
             "referral_purchase_reward_amount":  "0",
             "referral_purchase_reward_package": "",
             # Multi-channel forced join (JSON list of {"name","username","id"})
-            "forced_channels": '[{"name": "Developer Bot", "username": "@EmadHabibnia", "id": "-1002261879501"}]',
+            "forced_channels": '[{"name": "Developer Bot", "username": "@bothamedehsan", "id": "-1003990976884"}]',
             # Last time the hourly owner promo was sent
             "owner_last_promo_at": "",
         }
