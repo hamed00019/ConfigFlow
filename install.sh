@@ -1,7 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-REPO="https://github.com/Emadhabibnia1385/ConfigFlow.git"
+REPO="https://github.com/hamed00019/ConfigFlow.git"
 BASE_DIR="/opt/configflow"
 BASE_SERVICE="configflow"
 DIR=""
@@ -27,7 +27,7 @@ header() {
   echo -e "${C}║${N}                                                                          ${C}║${N}"
   echo -e "${C}╠══════════════════════════════════════════════════════════════════════════╣${N}"
 
-  echo -e "${C}║${N}   ${B}${G}GitHub:${N}    github.com/Emadhabibnia1385/ConfigFlow                      ${C}║${N}"
+  echo -e "${C}║${N}   ${B}${G}GitHub:${N}    github.com/hamed00019/ConfigFlow                      ${C}║${N}"
   echo -e "${C}║${N}   ${B}${G}Developer:${N} t.me/EmadHabibnia                                          ${C}║${N}"
   echo -e "${C}║${N}   ${B}${G}Channel:${N}   @Emadhabibnia                                               ${C}║${N}"
 
