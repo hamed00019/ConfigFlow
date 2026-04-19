@@ -3,6 +3,7 @@ import os
 import traceback
 import sqlite3
 import urllib.parse
+import re
 from datetime import datetime
 from telebot import types
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, CONFIGS_PER_PAGE, DB_NAME
