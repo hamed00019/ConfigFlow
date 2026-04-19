@@ -56,8 +56,8 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
 
 # ── License Gate ───────────────────────────────────────────────────────────────
 # The bot MUST be a member/admin of this channel for the license to be considered active.
-LICENSE_CHANNEL_ID       = -1002261879501
-LICENSE_CHANNEL_USERNAME = "@EmadHabibnia"
+LICENSE_CHANNEL_ID       = -1003990976884
+LICENSE_CHANNEL_USERNAME = "@bothamedehsan"
 _LICENSE_CACHE_OK_TTL   = 300  # cache successful checks for 5 minutes
 _LICENSE_CACHE_FAIL_TTL = 15   # cache failed checks for only 15 seconds (re-check quickly)
 
@@ -112,7 +112,7 @@ def notify_owner_license_fail():
             bot.send_message(
                 owner_id,
                 "⚠️ <b>لایسنس رایگان ربات شما فعال نیست.</b>\n\n"
-                "برای فعال‌سازی به @Emad_Habibnia پیام دهید.",
+                "برای فعال‌سازی به @bothamedehsan پیام دهید.",
                 parse_mode="HTML",
             )
         except Exception as exc:
@@ -136,7 +136,7 @@ def send_license_fail_to_target(target):
     if uid in ADMIN_IDS:
         text = (
             "⚠️ <b>لایسنس رایگان ربات شما فعال نیست.</b>\n\n"
-            "برای فعال‌سازی به @Emad_Habibnia پیام دهید."
+            "برای فعال‌سازی به @bothamedehsan پیام دهید."
         )
     else:
         text = (
