@@ -550,9 +550,7 @@ def delete_type(type_id):
 def get_packages(type_id=None, price_only=None, include_inactive=False):
     q = """
         SELECT p.*, t.name AS type_name,
-        (SELECT COUNT(*) FROM configs c WHERE c.package_id=p.id
-         AND c.sold_to IS NULL AND c.reserved_payment_id IS NULL
-         AND c.is_expired=0) AS stock
+        9999 AS stock
         FROM packages p
         JOIN config_types t ON t.id=p.type_id
         WHERE 1=1
@@ -576,9 +574,7 @@ def get_package(package_id):
         return conn.execute(
             """
             SELECT p.*, t.name AS type_name,
-            (SELECT COUNT(*) FROM configs c WHERE c.package_id=p.id
-             AND c.sold_to IS NULL AND c.reserved_payment_id IS NULL
-             AND c.is_expired=0) AS stock
+            9999 AS stock
             FROM packages p
             JOIN config_types t ON t.id=p.type_id
             WHERE p.id=?
