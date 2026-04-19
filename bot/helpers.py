@@ -118,8 +118,8 @@ def esc(t):
 
 
 # ── State management ───────────────────────────────────────────────────────────
-def state_set(uid, name, **data):
-    USER_STATE[uid] = {"state_name": name, "data": data}
+def state_set(uid, state_name, **data):
+    USER_STATE[uid] = {"state_name": state_name, "data": data}
 
 
 def state_clear(uid):
