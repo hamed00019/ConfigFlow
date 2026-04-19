@@ -28,8 +28,8 @@ header() {
   echo -e "${C}╠══════════════════════════════════════════════════════════════════════════╣${N}"
 
   echo -e "${C}║${N}   ${B}${G}GitHub:${N}    github.com/hamed00019/ConfigFlow                      ${C}║${N}"
-  echo -e "${C}║${N}   ${B}${G}Developer:${N} t.me/EmadHabibnia                                          ${C}║${N}"
-  echo -e "${C}║${N}   ${B}${G}Channel:${N}   @Emadhabibnia                                               ${C}║${N}"
+  echo -e "${C}║${N}   ${B}${G}Developer:${N} t.me/bothamedehsan                                          ${C}║${N}"
+  echo -e "${C}║${N}   ${B}${G}Channel:${N}   @bothamedehsan                                               ${C}║${N}"
 
   echo -e "${C}╚══════════════════════════════════════════════════════════════════════════╝${N}"
   echo ""
