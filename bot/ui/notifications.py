@@ -541,7 +541,7 @@ _PROMO_INTERVAL_SECONDS = 3600  # 1 hour
 _PROMO_TEXT = (
     "دیگه وقتشه رباتت رو به Seamless Premium ارتقا بدی 🚀\n"
     "ربات با کلی امکانات\n"
-    "برای اطلاعات بیشتر و خرید اشتراک به @Emad_Habibnia پیام بدهید"
+    "برای اطلاعات بیشتر و خرید اشتراک به @bothamedehsan پیام بدهید"
 )
 
 
